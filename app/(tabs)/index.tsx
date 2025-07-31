@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   RefreshControl,
   Dimensions,
   Modal,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -18,6 +20,9 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Picker } from '@react-native-picker/picker';
+
 
 type EventItem = {
   id: string;
@@ -35,10 +40,18 @@ type EventItem = {
 export default function HomeScreen() {
   const router = useRouter();
   const [events, setEvents] = useState<EventItem[]>([]);
+  const [filteredEvents, setFilteredEvents] = useState<EventItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null);
+
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState<Date | null>(null);
+  const [sortOption, setSortOption] = useState<'nearest' | 'latest' | null>(null);
+
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const fetchEvents = async () => {
     try {
@@ -64,11 +77,49 @@ export default function HomeScreen() {
     });
   };
 
+  const filterAndSortEvents = useCallback(() => {
+    let data = [...events];
+
+    if (categoryFilter) {
+      data = data.filter((e) =>
+        e.category.toLowerCase().includes(categoryFilter.toLowerCase())
+      );
+    }
+
+    if (dateFilter) {
+      const selectedDate = dateFilter.toISOString().split('T')[0];
+      data = data.filter((e) => e.date === selectedDate);
+    }
+
+    if (sortOption === 'nearest' && userLocation) {
+      data.sort((a, b) => {
+        const distA = Math.sqrt(
+          Math.pow(a.location.latitude - userLocation.latitude, 2) +
+          Math.pow(a.location.longitude - userLocation.longitude, 2)
+        );
+        const distB = Math.sqrt(
+          Math.pow(b.location.latitude - userLocation.latitude, 2) +
+          Math.pow(b.location.longitude - userLocation.longitude, 2)
+        );
+        return distA - distB;
+      });
+    }
+
+    if (sortOption === 'latest') {
+      data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+
+    setFilteredEvents(data);
+  }, [events, categoryFilter, dateFilter, sortOption, userLocation]);
+
   useEffect(() => {
     fetchEvents();
     fetchLocation();
   }, []);
 
+  useEffect(() => {
+    filterAndSortEvents();
+  }, [events, categoryFilter, dateFilter, sortOption]);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchEvents().finally(() => setRefreshing(false));
@@ -78,13 +129,36 @@ export default function HomeScreen() {
     setSelectedEvent(event);
   };
 
+  const resetFilters = () => {
+    setCategoryFilter('');
+    setDateFilter(null);
+    setSortOption(null);
+    setFilterModalVisible(false);
+  };
+
+  const renderActiveFilters = () => {
+    const active: string[] = [];
+    if (categoryFilter) active.push(`Kategoria: ${categoryFilter}`);
+    if (dateFilter) active.push(`Data: ${dateFilter.toISOString().split('T')[0]}`);
+    if (sortOption === 'nearest') active.push('Sort: Najbliższe');
+    if (sortOption === 'latest') active.push('Sort: Najnowsze');
+
+    if (active.length === 0) return null;
+
+    return (
+      <View style={styles.activeFiltersContainer}>
+        {active.map((filter, index) => (
+          <Text key={index} style={styles.activeFilterText}>• {filter}</Text>
+        ))}
+      </View>
+    );
+  };
+
   const renderListView = () => (
     <FlatList
-      data={events}
+      data={filteredEvents}
       keyExtractor={(item) => item.id}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       renderItem={({ item }) => (
         <Pressable
           style={styles.card}
@@ -127,7 +201,7 @@ export default function HomeScreen() {
         }}
         showsUserLocation
       >
-        {events.map((event) => (
+        {filteredEvents.map((event) => (
           <Marker
             key={event.id}
             coordinate={event.location}
@@ -172,27 +246,89 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <Text style={styles.logo}>NearUp</Text>
 
-      <View style={styles.switchContainer}>
-        <Pressable onPress={() => setViewMode('list')}>
-          <Text style={[styles.switchText, viewMode === 'list' && styles.activeSwitch]}>Lista</Text>
-        </Pressable>
-        <Text style={styles.switchText}> | </Text>
-        <Pressable onPress={() => setViewMode('map')}>
-          <Text style={[styles.switchText, viewMode === 'map' && styles.activeSwitch]}>Mapa</Text>
-        </Pressable>
+      <View style={styles.headerRow}>
+        <Text style={styles.subheader}>Wydarzenia najbliżej Ciebie</Text>
+        <View style={styles.switchContainer}>
+          <Pressable onPress={() => setViewMode('list')}>
+            <Text style={[styles.switchText, viewMode === 'list' && styles.activeSwitch]}>Lista</Text>
+          </Pressable>
+          <Text style={styles.switchText}> | </Text>
+          <Pressable onPress={() => setViewMode('map')}>
+            <Text style={[styles.switchText, viewMode === 'map' && styles.activeSwitch]}>Mapa</Text>
+          </Pressable>
+        </View>
       </View>
 
-      <Text style={styles.subheader}>Wydarzenia najbliżej Ciebie</Text>
+      {renderActiveFilters()}
+
+      <View style={{ alignItems: 'flex-end', marginBottom: 10 }}>
+        <Pressable onPress={() => setFilterModalVisible(true)} style={styles.filterButton}>
+          <Ionicons name="options" size={20} color="#fff" />
+          <Text style={{ color: '#fff', marginLeft: 6 }}>Filtruj</Text>
+        </Pressable>
+      </View>
 
       {viewMode === 'list' ? renderListView() : renderMapView()}
 
       <Pressable style={styles.addButton} onPress={() => router.push('/CreateEvent')}>
         <Ionicons name="add" size={32} color="white" />
       </Pressable>
+
+      <Modal visible={filterModalVisible} animationType="slide" transparent>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>Filtry</Text>
+            <Text style={{ marginTop: 10 }}>Kategoria</Text>
+            <View style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, marginTop: 6 }}>
+              <Picker
+                selectedValue={categoryFilter}
+                onValueChange={(itemValue) => setCategoryFilter(itemValue)}>
+                <Picker.Item label="Wybierz kategorię" value="" />
+                <Picker.Item label="Koncert" value="Koncert" />
+                <Picker.Item label="Sport" value="Sport" />
+                <Picker.Item label="Kultura" value="Kultura" />
+                <Picker.Item label="Inne" value="Inne" />
+              </Picker>
+            </View>
+            <Pressable onPress={() => setShowDatePicker(true)} style={styles.input}>
+              <Text>{dateFilter ? dateFilter.toDateString() : 'Wybierz datę'}</Text>
+            </Pressable>
+            {showDatePicker && (
+              <DateTimePicker
+                value={dateFilter || new Date()}
+                mode="date"
+                display="default"
+                onChange={(e, selectedDate) => {
+                  setShowDatePicker(false);
+                  if (selectedDate) setDateFilter(selectedDate);
+                }}
+              />
+            )}
+
+            <Text style={{ marginTop: 10 }}>Sortowanie:</Text>
+            <View style={styles.sortButtons}>
+              <Pressable onPress={() => setSortOption('nearest')} style={[styles.sortOption, sortOption === 'nearest' && styles.activeSort]}>
+                <Text style={styles.sortText}>Najbliższe</Text>
+              </Pressable>
+              <Pressable onPress={() => setSortOption('latest')} style={[styles.sortOption, sortOption === 'latest' && styles.activeSort]}>
+                <Text style={styles.sortText}>Najnowsze</Text>
+              </Pressable>
+            </View>
+
+            <View style={{ marginTop: 20, flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Pressable onPress={resetFilters} style={styles.resetButton}>
+                <Text style={{ color: '#4E6EF2' }}>Resetuj</Text>
+              </Pressable>
+              <Pressable onPress={() => setFilterModalVisible(false)} style={styles.confirmButton}>
+                <Text style={{ color: '#fff' }}>Zastosuj</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -208,19 +344,23 @@ const styles = StyleSheet.create({
     color: '#4E6EF2',
     fontFamily: 'monospace',
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   subheader: {
-    fontSize: 18,
-    textAlign: 'center',
-    marginBottom: 10,
+    fontSize: 16,
     color: '#444',
+    fontWeight: '500',
   },
   switchContainer: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 4,
+    alignItems: 'center',
   },
   switchText: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#888',
     marginHorizontal: 4,
   },
@@ -229,6 +369,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textDecorationLine: 'underline',
   },
+  activeFiltersContainer: {
+    backgroundColor: '#eef1ff',
+    padding: 8,
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  activeFilterText: {
+    fontSize: 13,
+    color: '#4E6EF2',
+  },
   card: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -236,7 +386,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     elevation: 2,
     shadowColor: '#000',
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
   },
@@ -307,5 +457,65 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     alignItems: 'center',
+  },
+  filterButton: {
+    flexDirection: 'row',
+    backgroundColor: '#4E6EF2',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    alignItems: 'center',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    width: '85%',
+    padding: 20,
+    borderRadius: 12,
+    elevation: 10,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+  },
+  sortButtons: {
+    flexDirection: 'row',
+    marginTop: 10,
+    gap: 10,
+  },
+  sortOption: {
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#4E6EF2',
+    borderRadius: 6,
+    backgroundColor: '#9ed4deff',
+  },
+  activeSort: {
+    backgroundColor: '#4E6EF2',
+  },
+  sortText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  resetButton: {
+    borderWidth: 1,
+    borderColor: '#4E6EF2',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  confirmButton: {
+    backgroundColor: '#4E6EF2',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
 });
