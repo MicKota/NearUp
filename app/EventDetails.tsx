@@ -1,12 +1,14 @@
+
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Platform, StatusBar, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Platform, StatusBar } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
 
 export default function EventDetails() {
-  const { title, description, location, category, date, time } = useLocalSearchParams();
+  const { title, description, address, category, date, time, latitude, longitude } = useLocalSearchParams();
 
-  const parsedLocation = typeof location === 'string' ? JSON.parse(location) : location;
+  const parsedLat = latitude ? parseFloat(latitude as string) : null;
+  const parsedLng = longitude ? parseFloat(longitude as string) : null;
 
   return (
     <ScrollView style={styles.container}>
@@ -19,28 +21,27 @@ export default function EventDetails() {
       <Text style={styles.text}>{description}</Text>
 
       <Text style={styles.label}>Lokalizacja:</Text>
-      {parsedLocation?.latitude && parsedLocation?.longitude ? (
+      <Text style={styles.text}>📍 {address || 'Brak adresu'}</Text>
+      {parsedLat && parsedLng ? (
         <MapView
           style={styles.map}
           initialRegion={{
-            latitude: parsedLocation.latitude,
-            longitude: parsedLocation.longitude,
+            latitude: parsedLat,
+            longitude: parsedLng,
             latitudeDelta: 0.01,
             longitudeDelta: 0.01,
           }}
         >
           <Marker
             coordinate={{
-              latitude: parsedLocation.latitude,
-              longitude: parsedLocation.longitude,
+              latitude: parsedLat,
+              longitude: parsedLng,
             }}
             title={title as string}
             description={description as string}
           />
         </MapView>
-      ) : (
-        <Text style={styles.text}>📍 Brak danych lokalizacji</Text>
-      )}
+      ) : null}
 
       <Text style={styles.label}>Data i czas:</Text>
       <Text style={styles.text}>📅 {date} ⏰ {time}</Text>

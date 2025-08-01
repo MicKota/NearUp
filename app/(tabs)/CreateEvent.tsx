@@ -12,6 +12,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as Location from 'expo-location';
 import MapView, { Marker, MapPressEvent } from 'react-native-maps';
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -24,18 +25,58 @@ export default function CreateEvent() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [address, setAddress] = useState('');
+  const [addressInput, setAddressInput] = useState('');
+  const [isGeocoding, setIsGeocoding] = useState(false);
   const [category, setCategory] = useState('');
   const [date, setDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [time, setTime] = useState<Date | null>(null);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
-  const handleMapPress = (e: MapPressEvent) => {
-    setLocation(e.nativeEvent.coordinate);
+  // Reverse geocoding po kliknięciu na mapę
+  const handleMapPress = async (e: MapPressEvent) => {
+    const coords = e.nativeEvent.coordinate;
+    setLocation(coords);
+    setIsGeocoding(true);
+    try {
+      const [geo] = await Location.reverseGeocodeAsync(coords);
+      if (geo) {
+        const addr = `${geo.street || ''} ${geo.name || ''}, ${geo.postalCode || ''} ${geo.city || geo.district || ''}`.trim();
+        setAddress(addr);
+        setAddressInput(addr);
+      } else {
+        setAddress('Nieznany adres');
+        setAddressInput('');
+      }
+    } catch (err) {
+      setAddress('Błąd pobierania adresu');
+      setAddressInput('');
+    }
+    setIsGeocoding(false);
+  };
+
+  // Geocoding po wpisaniu adresu
+  const handleAddressSearch = async () => {
+    if (!addressInput.trim()) return;
+    setIsGeocoding(true);
+    try {
+      const results = await Location.geocodeAsync(addressInput);
+      if (results && results.length > 0) {
+        const coords = { latitude: results[0].latitude, longitude: results[0].longitude };
+        setLocation(coords);
+        setAddress(addressInput);
+      } else {
+        Alert.alert('Nie znaleziono lokalizacji dla podanego adresu.');
+      }
+    } catch (err) {
+      Alert.alert('Błąd podczas wyszukiwania adresu.');
+    }
+    setIsGeocoding(false);
   };
 
   const handleSubmit = async () => {
-    if (!title || !description || !location || !category || !date || !time) {
+    if (!title || !description || !location || !address || !category || !date || !time) {
       Alert.alert('Uzupełnij wszystkie pola');
       return;
     }
@@ -44,14 +85,16 @@ export default function CreateEvent() {
       await addDoc(collection(db, 'events'), {
         title,
         description,
-        location,
+        location, // współrzędne dla serwera
+        address,   // adres dla użytkownika
         category,
         date: date.toISOString().split('T')[0],
         time: time.toTimeString().split(' ')[0].slice(0, 5),
       });
 
       Alert.alert('Wydarzenie utworzone!');
-      router.push('/');
+      // Przekaż parametr do routera, aby wymusić odświeżenie listy
+      router.push({ pathname: '/', params: { refresh: '1' } });
     } catch (error) {
       console.error('Błąd podczas zapisu:', error);
       Alert.alert('Błąd podczas zapisywania wydarzenia.');
@@ -59,7 +102,7 @@ export default function CreateEvent() {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }}>
       <Text style={styles.logo}>NearUp</Text>
       <Text style={styles.subheader}>Utwórz nowe wydarzenie</Text>
 
@@ -127,21 +170,51 @@ export default function CreateEvent() {
         />
       )}
 
+      <Text style={styles.label}>Adres wydarzenia:</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <TextInput
+          style={[styles.input, { flex: 1, backgroundColor: '#fff', marginBottom: 0 }]}
+          value={addressInput}
+          placeholder="Wpisz adres lub wybierz na mapie"
+          onChangeText={setAddressInput}
+          onBlur={handleAddressSearch}
+          editable={!isGeocoding}
+        />
+        <Pressable
+          onPress={handleAddressSearch}
+          style={{ backgroundColor: '#4E6EF2', padding: 10, borderRadius: 8 }}
+          disabled={isGeocoding}
+        >
+          <Text style={{ color: '#fff', fontWeight: 'bold' }}>Szukaj</Text>
+        </Pressable>
+      </View>
+      {address && (
+        <Text style={{ color: '#4E6EF2', marginBottom: 8, marginTop: 2, fontSize: 13 }}>Wybrany adres: {address}</Text>
+      )}
+
       <Text style={styles.label}>Kliknij na mapie, aby wybrać lokalizację:</Text>
       <MapView
         style={styles.map}
         onPress={handleMapPress}
         initialRegion={{
-          latitude: 52.2297,
-          longitude: 21.0122,
+          latitude: location?.latitude || 52.2297,
+          longitude: location?.longitude || 21.0122,
           latitudeDelta: 0.1,
           longitudeDelta: 0.1,
         }}
+        region={location ? {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        } : undefined}
       >
         {location && <Marker coordinate={location} />}
       </MapView>
 
+      
       <Button title="Utwórz wydarzenie" onPress={handleSubmit} color="#4E6EF2" />
+
     </ScrollView>
   );
 }
@@ -200,5 +273,6 @@ const styles = StyleSheet.create({
     height: 200,
     borderRadius: 10,
     marginBottom: 20,
+    marginTop: 8,
   },
 });

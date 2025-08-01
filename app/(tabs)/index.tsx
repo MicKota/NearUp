@@ -15,7 +15,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import MapView, { Marker } from 'react-native-maps';
@@ -24,21 +24,24 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 
 
-type EventItem = {
-  id: string;
-  title: string;
-  description: string;
-  location: {
-    latitude: number;
-    longitude: number;
-  };
-  category: string;
-  date: string;
-  time: string;
-};
 
-export default function HomeScreen() {
+function HomeScreen() {
+  type EventItem = {
+    id: string;
+    title: string;
+    description: string;
+    location: {
+      latitude: number;
+      longitude: number;
+    };
+    address?: string;
+    category: string;
+    date: string;
+    time: string;
+  };
+
   const router = useRouter();
+  const params = useLocalSearchParams();
   const [events, setEvents] = useState<EventItem[]>([]);
   const [filteredEvents, setFilteredEvents] = useState<EventItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -112,10 +115,17 @@ export default function HomeScreen() {
     setFilteredEvents(data);
   }, [events, categoryFilter, dateFilter, sortOption, userLocation]);
 
+
   useEffect(() => {
-    fetchEvents();
     fetchLocation();
   }, []);
+
+  // Odświeżaj listę przy pierwszym wejściu i po powrocie z parametrem refresh
+  useFocusEffect(
+    useCallback(() => {
+      fetchEvents();
+    }, [params.refresh])
+  );
 
   useEffect(() => {
     filterAndSortEvents();
@@ -172,6 +182,7 @@ export default function HomeScreen() {
                 category: item.category,
                 date: item.date,
                 time: item.time,
+                address: item.address,
                 latitude: item.location.latitude.toString(),
                 longitude: item.location.longitude.toString(),
               },
@@ -180,7 +191,7 @@ export default function HomeScreen() {
         >
           <Text style={styles.title}>{item.title}</Text>
           <Text style={styles.info}>{item.description}</Text>
-          <Text style={styles.detail}>📍 {item.location.latitude.toFixed(3)}, {item.location.longitude.toFixed(3)}</Text>
+          <Text style={styles.detail}>📍 {item.address || 'Brak adresu'}</Text>
           <Text style={styles.detail}>📅 {item.date} ⏰ {item.time}</Text>
           <Text style={styles.category}>{item.category}</Text>
         </Pressable>
@@ -215,7 +226,7 @@ export default function HomeScreen() {
         <View style={styles.popup}>
           <Text style={styles.popupTitle}>{selectedEvent.title}</Text>
           <Text style={styles.popupInfo}>📅 {selectedEvent.date} ⏰ {selectedEvent.time}</Text>
-          <Text style={styles.popupInfo}>📍 {selectedEvent.location.latitude.toFixed(3)}, {selectedEvent.location.longitude.toFixed(3)}</Text>
+          <Text style={styles.popupInfo}>📍 {selectedEvent.address || 'Brak adresu'}</Text>
           <Pressable
             style={styles.detailsButton}
             onPress={() => {
@@ -229,6 +240,7 @@ export default function HomeScreen() {
                   category: selectedEvent.category,
                   date: selectedEvent.date,
                   time: selectedEvent.time,
+                  address: selectedEvent.address,
                   latitude: selectedEvent.location.latitude.toString(),
                   longitude: selectedEvent.location.longitude.toString(),
                 },
@@ -241,7 +253,6 @@ export default function HomeScreen() {
       )}
     </View>
   );
-
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.logo}>NearUp</Text>
@@ -329,6 +340,7 @@ export default function HomeScreen() {
     </SafeAreaView>
   );
 }
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -519,3 +531,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
 });
+
+export default HomeScreen;
