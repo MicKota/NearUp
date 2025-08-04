@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
+import type { EventCategory } from '../../types/eventCategory';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -35,9 +36,11 @@ function HomeScreen() {
       longitude: number;
     };
     address?: string;
-    category: string;
+    userId?: string;
+    category: EventCategory;
     date: string;
     time: string;
+    createdAt?: string;
   };
 
   const router = useRouter();
@@ -83,6 +86,10 @@ function HomeScreen() {
   const filterAndSortEvents = useCallback(() => {
     let data = [...events];
 
+    // Filtruj wydarzenia po dacie (nie pokazuj przeszłych)
+    const today = new Date().toISOString().split('T')[0];
+    data = data.filter((e) => e.date >= today);
+
     if (categoryFilter) {
       data = data.filter((e) =>
         e.category.toLowerCase().includes(categoryFilter.toLowerCase())
@@ -109,7 +116,11 @@ function HomeScreen() {
     }
 
     if (sortOption === 'latest') {
-      data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      data.sort((a, b) => {
+        const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return bCreated - aCreated;
+      });
     }
 
     setFilteredEvents(data);
@@ -169,33 +180,65 @@ function HomeScreen() {
       data={filteredEvents}
       keyExtractor={(item) => item.id}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      renderItem={({ item }) => (
-        <Pressable
-          style={styles.card}
-          onPress={() =>
-            router.push({
-              pathname: '/EventDetails',
-              params: {
-                id: item.id,
-                title: item.title,
-                description: item.description,
-                category: item.category,
-                date: item.date,
-                time: item.time,
-                address: item.address,
-                latitude: item.location.latitude.toString(),
-                longitude: item.location.longitude.toString(),
-              },
-            })
-          }
-        >
-          <Text style={styles.title}>{item.title}</Text>
-          <Text style={styles.info}>{item.description}</Text>
-          <Text style={styles.detail}>📍 {item.address || 'Brak adresu'}</Text>
-          <Text style={styles.detail}>📅 {item.date} ⏰ {item.time}</Text>
-          <Text style={styles.category}>{item.category}</Text>
-        </Pressable>
-      )}
+      renderItem={({ item }) => {
+        // Oblicz odległość od użytkownika
+        let distanceText = '';
+        if (userLocation && item.location) {
+          const R = 6371; // km
+          const dLat = (item.location.latitude - userLocation.latitude) * Math.PI / 180;
+          const dLon = (item.location.longitude - userLocation.longitude) * Math.PI / 180;
+          const lat1 = userLocation.latitude * Math.PI / 180;
+          const lat2 = item.location.latitude * Math.PI / 180;
+          const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const distance = R * c;
+          distanceText = `• ${distance.toFixed(1)} km od Ciebie`;
+        }
+
+        // Oblicz ile czasu temu utworzono wydarzenie
+        let createdText = '';
+        if (item.createdAt) {
+          const createdDate = new Date(item.createdAt);
+          const now = new Date();
+          const diffMs = now.getTime() - createdDate.getTime();
+          const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+          const diffMinutes = Math.floor(diffMs / (1000 * 60));
+          if (diffDays > 0) createdText = `dodano ${diffDays} dni temu`;
+          else if (diffHours > 0) createdText = `dodano ${diffHours} godz. temu`;
+          else createdText = `dodano ${diffMinutes} min temu`;
+        }
+
+        return (
+          <Pressable
+            style={styles.card}
+            onPress={() =>
+              router.push({
+                pathname: '/EventDetails',
+                params: {
+                  id: item.id,
+                  title: item.title,
+                  description: item.description,
+                  category: item.category,
+                  date: item.date,
+                  time: item.time,
+                  address: item.address,
+                  latitude: item.location.latitude.toString(),
+                  longitude: item.location.longitude.toString(),
+                  userId: item.userId,
+                },
+              })
+            }
+          >
+            <Text style={styles.title}>{item.title}</Text>
+            <Text style={styles.info}>{item.description}</Text>
+            <Text style={styles.detail}>📍 {item.address || 'Brak adresu'}</Text>
+            <Text style={styles.detail}>📅 {item.date} ⏰ {item.time}</Text>
+            <Text style={styles.category}>{item.category}</Text>
+            <Text style={styles.detail}>{createdText} {distanceText}</Text>
+          </Pressable>
+        );
+      }}
       contentContainerStyle={{ paddingBottom: 100 }}
     />
   );
@@ -243,6 +286,7 @@ function HomeScreen() {
                   address: selectedEvent.address,
                   latitude: selectedEvent.location.latitude.toString(),
                   longitude: selectedEvent.location.longitude.toString(),
+                  userId: selectedEvent.userId,
                 },
               });
             }}

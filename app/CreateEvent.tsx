@@ -14,10 +14,11 @@ import {
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { collection, addDoc } from 'firebase/firestore';
-import { db, auth } from '../../firebase';
+import { db, auth } from '../firebase';
 import MapView, { Marker } from 'react-native-maps';
 import type { MapPressEvent } from 'react-native-maps';
 import { Picker } from '@react-native-picker/picker';
+import { EVENT_CATEGORIES, EventCategory } from '../types/eventCategory';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function CreateEvent() {
@@ -96,6 +97,7 @@ export default function CreateEvent() {
         date: date.toISOString().split('T')[0],
         time: time.toTimeString().split(' ')[0].slice(0, 5),
         userId: user.uid,
+        createdAt: new Date().toISOString(),
       });
 
       Alert.alert('Wydarzenie utworzone!');
@@ -130,13 +132,12 @@ export default function CreateEvent() {
       <View style={styles.pickerWrapper}>
         <Picker
           selectedValue={category}
-          onValueChange={(itemValue) => setCategory(itemValue)}
+          onValueChange={(itemValue) => setCategory(itemValue as EventCategory)}
         >
           <Picker.Item label="Wybierz kategorię" value="" />
-          <Picker.Item label="Koncert" value="Koncert" />
-          <Picker.Item label="Sport" value="Sport" />
-          <Picker.Item label="Kultura" value="Kultura" />
-          <Picker.Item label="Inne" value="Inne" />
+          {EVENT_CATEGORIES.map(cat => (
+            <Picker.Item key={cat} label={cat} value={cat} />
+          ))}
         </Picker>
       </View>
 
