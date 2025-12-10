@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import type { User } from 'firebase/auth';
 import { auth } from './firebase';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -11,7 +10,7 @@ import UserProfile from './app/(tabs)/UserProfile';
 const Stack = createNativeStackNavigator();
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

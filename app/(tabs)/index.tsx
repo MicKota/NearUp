@@ -1,4 +1,18 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+// Lokalny typ wydarzenia
+type EventItem = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  date: string;
+  time: string;
+  address?: string;
+  location: { latitude: number; longitude: number };
+  userId: string;
+  createdAt?: string;
+};
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { PanResponder } from 'react-native';
 import {
   View,
   Text,
@@ -18,54 +32,82 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
-import type { EventCategory } from '../../types/eventCategory';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
+import { EVENT_CATEGORIES, EventCategory } from '../../types/eventCategory';
+
 
 
 
 function HomeScreen() {
-  type EventItem = {
-    id: string;
-    title: string;
-    description: string;
-    location: {
-      latitude: number;
-      longitude: number;
-    };
-    address?: string;
-    userId?: string;
-    category: EventCategory;
-    date: string;
-    time: string;
-    createdAt?: string;
-  };
+  const mapRef = useRef<MapView>(null);
+
 
   const router = useRouter();
   const params = useLocalSearchParams();
   const [events, setEvents] = useState<EventItem[]>([]);
   const [filteredEvents, setFilteredEvents] = useState<EventItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [viewMode, setViewMode] = useState('list');
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null);
+  const [selectedEventIndex, setSelectedEventIndex] = useState<number | null>(null);
 
-  const [categoryFilter, setCategoryFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<EventCategory | ''>('');
   const [dateFilter, setDateFilter] = useState<Date | null>(null);
-  const [sortOption, setSortOption] = useState<'nearest' | 'latest' | null>(null);
+  const [sortOption, setSortOption] = useState<string | null>(null);
+  const [distanceFilter, setDistanceFilter] = useState<number | null>(null); // km
+
+  // Tymczasowe (pending) filtry używane w modalnym UI — stosujemy je dopiero po naciśnięciu "Pokaż"
+  const [pendingCategoryFilter, setPendingCategoryFilter] = useState<EventCategory | ''>('');
+  const [pendingDateFilter, setPendingDateFilter] = useState<Date | null>(null);
+  const [pendingSortOption, setPendingSortOption] = useState<string | null>(null);
+  const [pendingDistanceFilter, setPendingDistanceFilter] = useState<number | null>(null);
 
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  // Skopiuj aktualne filtry do pending kiedy otwieramy modal
+  useEffect(() => {
+    if (filterModalVisible) {
+      setPendingCategoryFilter(categoryFilter);
+      setPendingDateFilter(dateFilter);
+      setPendingSortOption(sortOption);
+      setPendingDistanceFilter(distanceFilter);
+    }
+  }, [filterModalVisible]);
+
+    useEffect(() => {
+    if (viewMode === 'map' && userLocation && mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: userLocation.latitude,
+        longitude: userLocation.longitude,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      }, 500);
+    }
+  }, [viewMode, userLocation]);
+
   const fetchEvents = async () => {
     try {
       const snapshot = await getDocs(collection(db, 'events'));
-      const data: EventItem[] = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...(doc.data() as Omit<EventItem, 'id'>),
-      }));
+      const data: EventItem[] = snapshot.docs.map((doc) => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          title: d.title || '',
+          description: d.description || '',
+          category: d.category || '',
+          date: d.date || '',
+          time: d.time || '',
+          address: d.address || '',
+          location: d.location || { latitude: 0, longitude: 0 },
+          userId: d.userId || '',
+          createdAt: d.createdAt || '',
+        };
+      });
       setEvents(data);
     } catch (error) {
       console.error('Błąd podczas pobierania wydarzeń:', error);
@@ -101,6 +143,22 @@ function HomeScreen() {
       data = data.filter((e) => e.date === selectedDate);
     }
 
+    // Filtruj po odległości
+    if (distanceFilter && userLocation) {
+      data = data.filter((e) => {
+        if (!e.location) return false;
+        const R = 6371; // km
+        const dLat = (e.location.latitude - userLocation.latitude) * Math.PI / 180;
+        const dLon = (e.location.longitude - userLocation.longitude) * Math.PI / 180;
+        const lat1 = userLocation.latitude * Math.PI / 180;
+        const lat2 = e.location.latitude * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const distance = R * c;
+        return distance <= distanceFilter;
+      });
+    }
+
     if (sortOption === 'nearest' && userLocation) {
       data.sort((a, b) => {
         const distA = Math.sqrt(
@@ -124,7 +182,72 @@ function HomeScreen() {
     }
 
     setFilteredEvents(data);
-  }, [events, categoryFilter, dateFilter, sortOption, userLocation]);
+  }, [events, categoryFilter, dateFilter, sortOption, userLocation, distanceFilter]);
+
+  // Helper: oblicz listę wydarzeń wg dowolnych filtrów (nie musi używać stanów)
+  const computeFilteredList = useCallback((
+    evts: EventItem[],
+    cat: EventCategory | '' ,
+    dateF: Date | null,
+    sortOpt: string | null,
+    distFilter: number | null,
+    uLoc: { latitude: number; longitude: number } | null
+  ) => {
+    let data = [...evts];
+    const today = new Date().toISOString().split('T')[0];
+    data = data.filter((e) => e.date >= today);
+
+    if (cat) {
+      data = data.filter((e) => e.category.toLowerCase().includes(cat.toLowerCase()));
+    }
+
+    if (dateF) {
+      const selectedDate = dateF.toISOString().split('T')[0];
+      data = data.filter((e) => e.date === selectedDate);
+    }
+
+    if (distFilter && uLoc) {
+      data = data.filter((e) => {
+        if (!e.location) return false;
+        const R = 6371; // km
+        const dLat = (e.location.latitude - uLoc.latitude) * Math.PI / 180;
+        const dLon = (e.location.longitude - uLoc.longitude) * Math.PI / 180;
+        const lat1 = uLoc.latitude * Math.PI / 180;
+        const lat2 = e.location.latitude * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const distance = R * c;
+        return distance <= distFilter;
+      });
+    }
+
+    if (sortOpt === 'nearest' && uLoc) {
+      data.sort((a, b) => {
+        const distA = Math.sqrt(
+          Math.pow(a.location.latitude - uLoc.latitude, 2) + Math.pow(a.location.longitude - uLoc.longitude, 2)
+        );
+        const distB = Math.sqrt(
+          Math.pow(b.location.latitude - uLoc.latitude, 2) + Math.pow(b.location.longitude - uLoc.longitude, 2)
+        );
+        return distA - distB;
+      });
+    }
+
+    if (sortOpt === 'latest') {
+      data.sort((a, b) => {
+        const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return bCreated - aCreated;
+      });
+    }
+
+    return data;
+  }, []);
+
+  // Ile wydarzeń spełniłoby obecne (pending) kryteria — używane do etykiety przycisku
+  const pendingFilteredCount = useMemo(() => {
+    return computeFilteredList(events, pendingCategoryFilter, pendingDateFilter, pendingSortOption, pendingDistanceFilter, userLocation).length;
+  }, [events, pendingCategoryFilter, pendingDateFilter, pendingSortOption, pendingDistanceFilter, userLocation, computeFilteredList]);
 
 
   useEffect(() => {
@@ -138,41 +261,128 @@ function HomeScreen() {
     }, [params.refresh])
   );
 
+  // Jeśli wróciliśmy z parametrem ?refresh (np. po utworzeniu wydarzenia), pobierz listę i usuń parametr
+  useEffect(() => {
+    if (params?.refresh) {
+      fetchEvents();
+      try {
+        // wyczyść parametr, żeby nie odświeżać w kółko
+        router.replace({ pathname: '/', params: {} });
+      } catch (e) {
+        // ignore router replace errors
+      }
+    }
+  }, [params?.refresh]);
+
+  // Odpal filtr/sortowanie przy zmianie wydarzeń lub dowolnego filtra (w tym distance/userLocation)
   useEffect(() => {
     filterAndSortEvents();
-  }, [events, categoryFilter, dateFilter, sortOption]);
+  }, [events, categoryFilter, dateFilter, sortOption, distanceFilter, userLocation]);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchEvents().finally(() => setRefreshing(false));
   }, []);
 
-  const handleMarkerPress = (event: EventItem) => {
+  const handleMarkerPress = (event: EventItem, index: number) => {
     setSelectedEvent(event);
+    setSelectedEventIndex(index);
   };
 
   const resetFilters = () => {
     setCategoryFilter('');
     setDateFilter(null);
     setSortOption(null);
+    setDistanceFilter(null);
+    // gdy resetujemy, zresetuj też pending (w modal)
+    setPendingCategoryFilter('');
+    setPendingDateFilter(null);
+    setPendingSortOption(null);
+    setPendingDistanceFilter(null);
     setFilterModalVisible(false);
   };
 
+  // Reset tylko pending (formularz) — nie zamyka modalu
+  const resetPendingFilters = () => {
+    setPendingCategoryFilter('');
+    setPendingDateFilter(null);
+    setPendingSortOption(null);
+    setPendingDistanceFilter(null);
+  };
+
   const renderActiveFilters = () => {
-    const active: string[] = [];
-    if (categoryFilter) active.push(`Kategoria: ${categoryFilter}`);
-    if (dateFilter) active.push(`Data: ${dateFilter.toISOString().split('T')[0]}`);
-    if (sortOption === 'nearest') active.push('Sort: Najbliższe');
-    if (sortOption === 'latest') active.push('Sort: Najnowsze');
-
-    if (active.length === 0) return null;
-
-    return (
-      <View style={styles.activeFiltersContainer}>
-        {active.map((filter, index) => (
-          <Text key={index} style={styles.activeFilterText}>• {filter}</Text>
-        ))}
+    const chips: JSX.Element[] = [];
+    if (categoryFilter) chips.push(
+      <View key="cat" style={styles.chip}>
+        <Text style={styles.chipText}>{`Kategoria: ${categoryFilter}`}</Text>
+        <Pressable onPress={() => removeFilter('category')} style={styles.chipClose}>
+          <Ionicons name="close" size={14} color="#4E6EF2" />
+        </Pressable>
       </View>
     );
+    if (dateFilter) chips.push(
+      <View key="date" style={styles.chip}>
+        <Text style={styles.chipText}>{`Data: ${dateFilter.toISOString().split('T')[0]}`}</Text>
+        <Pressable onPress={() => removeFilter('date')} style={styles.chipClose}>
+          <Ionicons name="close" size={14} color="#4E6EF2" />
+        </Pressable>
+      </View>
+    );
+    if (sortOption === 'nearest') chips.push(
+      <View key="sort-nearest" style={styles.chip}>
+        <Text style={styles.chipText}>Najbliższe</Text>
+        <Pressable onPress={() => removeFilter('sort')} style={styles.chipClose}>
+          <Ionicons name="close" size={14} color="#4E6EF2" />
+        </Pressable>
+      </View>
+    );
+    if (sortOption === 'latest') chips.push(
+      <View key="sort-latest" style={styles.chip}>
+        <Text style={styles.chipText}>Najnowsze</Text>
+        <Pressable onPress={() => removeFilter('sort')} style={styles.chipClose}>
+          <Ionicons name="close" size={14} color="#4E6EF2" />
+        </Pressable>
+      </View>
+    );
+    if (distanceFilter) chips.push(
+      <View key="dist" style={styles.chip}>
+        <Text style={styles.chipText}>{`Odległość: ${distanceFilter} km`}</Text>
+        <Pressable onPress={() => removeFilter('distance')} style={styles.chipClose}>
+          <Ionicons name="close" size={14} color="#4E6EF2" />
+        </Pressable>
+      </View>
+    );
+
+    if (chips.length === 0) return null;
+    return chips;
+  };
+
+  // Usuwa konkretny filtr i od razu odświeża widok listy
+  const removeFilter = (which: 'category' | 'date' | 'sort' | 'distance') => {
+    let newCategory = categoryFilter;
+    let newDate = dateFilter;
+    let newSort = sortOption;
+    let newDist = distanceFilter;
+
+    if (which === 'category') newCategory = '';
+    if (which === 'date') newDate = null;
+    if (which === 'sort') newSort = null;
+    if (which === 'distance') newDist = null;
+
+    // Zaktualizuj stany
+    setCategoryFilter(newCategory);
+    setDateFilter(newDate);
+    setSortOption(newSort);
+    setDistanceFilter(newDist);
+
+    // Zaktualizuj też pending, żeby modal pozostał spójny
+    setPendingCategoryFilter(newCategory);
+    setPendingDateFilter(newDate);
+    setPendingSortOption(newSort);
+    setPendingDistanceFilter(newDist);
+
+    // Oblicz i ustaw od razu przefiltrowaną listę
+    const newData = computeFilteredList(events, newCategory, newDate, newSort, newDist, userLocation);
+    setFilteredEvents(newData);
   };
 
   const renderListView = () => (
@@ -243,60 +453,169 @@ function HomeScreen() {
     />
   );
 
+
+
   const renderMapView = () => (
     <View style={styles.mapContainer}>
       <MapView
+        ref={mapRef}
         style={styles.map}
-        initialRegion={{
-          latitude: userLocation?.latitude || 52.2297,
-          longitude: userLocation?.longitude || 21.0122,
-          latitudeDelta: 0.1,
-          longitudeDelta: 0.1,
-        }}
-        showsUserLocation
+        initialRegion={userLocation ? {
+          latitude: userLocation.latitude,
+          longitude: userLocation.longitude,
+          latitudeDelta: 0.05,
+          longitudeDelta: 0.05,
+        } : undefined}
+        showsUserLocation={true}
       >
-        {filteredEvents.map((event) => (
+        {/* Okrąg zasięgu */}
+        {userLocation && distanceFilter && (
+          <Circle
+            center={userLocation}
+            radius={distanceFilter * 1000}
+            strokeColor="#4E6EF2"
+            fillColor="rgba(78,110,242,0.1)"
+          />
+        )}
+        {filteredEvents.map((event, index) => (
           <Marker
             key={event.id}
             coordinate={event.location}
-            title={event.title}
-            onPress={() => handleMarkerPress(event)}
-          />
+            onPress={() => handleMarkerPress(event, index)}
+          >
+          </Marker>
         ))}
       </MapView>
-
-      {selectedEvent && (
-        <View style={styles.popup}>
-          <Text style={styles.popupTitle}>{selectedEvent.title}</Text>
-          <Text style={styles.popupInfo}>📅 {selectedEvent.date} ⏰ {selectedEvent.time}</Text>
-          <Text style={styles.popupInfo}>📍 {selectedEvent.address || 'Brak adresu'}</Text>
-          <Pressable
-            style={styles.detailsButton}
-            onPress={() => {
-              setSelectedEvent(null);
-              router.push({
-                pathname: '/EventDetails',
-                params: {
-                  id: selectedEvent.id,
-                  title: selectedEvent.title,
-                  description: selectedEvent.description,
-                  category: selectedEvent.category,
-                  date: selectedEvent.date,
-                  time: selectedEvent.time,
-                  address: selectedEvent.address,
-                  latitude: selectedEvent.location.latitude.toString(),
-                  longitude: selectedEvent.location.longitude.toString(),
-                  userId: selectedEvent.userId,
-                },
-              });
-            }}
-          >
-            <Text style={{ color: '#fff' }}>Zobacz szczegóły</Text>
-          </Pressable>
-        </View>
+      {selectedEvent && selectedEventIndex !== null && (
+        <PopupWithSwipe
+          selectedEvent={selectedEvent}
+          selectedEventIndex={selectedEventIndex}
+          filteredEvents={filteredEvents}
+          userLocation={userLocation}
+          setSelectedEvent={setSelectedEvent}
+          setSelectedEventIndex={setSelectedEventIndex}
+          router={router}
+          mapRef={mapRef}
+        />
       )}
     </View>
   );
+// Helper component for popup with swipe and tap
+
+function PopupWithSwipe({
+  selectedEvent,
+  selectedEventIndex,
+  filteredEvents,
+  userLocation,
+  setSelectedEvent,
+  setSelectedEventIndex,
+  router,
+  mapRef
+}: {
+  selectedEvent: EventItem,
+  selectedEventIndex: number,
+  filteredEvents: EventItem[],
+  userLocation: { latitude: number; longitude: number } | null,
+  setSelectedEvent: (e: EventItem | null) => void,
+  setSelectedEventIndex: (i: number | null) => void,
+  router: any,
+  mapRef?: React.RefObject<MapView>
+}) {
+  const panResponder = PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 20,
+    onPanResponderRelease: (_, gestureState) => {
+      if (gestureState.dx < -40 && selectedEventIndex < filteredEvents.length - 1) {
+        const nextEvent = filteredEvents[selectedEventIndex + 1];
+        setSelectedEvent(nextEvent);
+        setSelectedEventIndex(selectedEventIndex + 1);
+        // Centrowanie mapy na kolejnym wydarzeniu
+        if (mapRef && mapRef.current) {
+          mapRef.current.animateToRegion({
+            latitude: nextEvent.location.latitude,
+            longitude: nextEvent.location.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          }, 500);
+        }
+      } else if (gestureState.dx > 40 && selectedEventIndex > 0) {
+        const prevEvent = filteredEvents[selectedEventIndex - 1];
+        setSelectedEvent(prevEvent);
+        setSelectedEventIndex(selectedEventIndex - 1);
+        // Centrowanie mapy na poprzednim wydarzeniu
+        if (mapRef && mapRef.current) {
+          mapRef.current.animateToRegion({
+            latitude: prevEvent.location.latitude,
+            longitude: prevEvent.location.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          }, 500);
+        }
+      }
+    },
+  });
+  // Calculate distance and time since added
+  let distanceText = '';
+  if (userLocation && selectedEvent.location) {
+    const R = 6371;
+    const dLat = (selectedEvent.location.latitude - userLocation.latitude) * Math.PI / 180;
+    const dLon = (selectedEvent.location.longitude - userLocation.longitude) * Math.PI / 180;
+    const lat1 = userLocation.latitude * Math.PI / 180;
+    const lat2 = selectedEvent.location.latitude * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = R * c;
+    distanceText = `• ${distance.toFixed(1)} km od Ciebie`;
+  }
+  let createdText = '';
+  if (selectedEvent.createdAt) {
+    const createdDate = new Date(selectedEvent.createdAt);
+    const now = new Date();
+    const diffMs = now.getTime() - createdDate.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    if (diffDays > 0) createdText = `dodano ${diffDays} dni temu`;
+    else if (diffHours > 0) createdText = `dodano ${diffHours} godz. temu`;
+    else createdText = `dodano ${diffMinutes} min temu`;
+  }
+  return (
+    <View
+      style={styles.popup}
+      {...panResponder.panHandlers}
+    >
+      <Pressable
+        style={{ flex: 1 }}
+        onPress={() => {
+          setSelectedEvent(null);
+          setSelectedEventIndex(null);
+          router.push({
+            pathname: '/EventDetails',
+            params: {
+              id: selectedEvent.id,
+              title: selectedEvent.title,
+              description: selectedEvent.description,
+              category: selectedEvent.category,
+              date: selectedEvent.date,
+              time: selectedEvent.time,
+              address: selectedEvent.address,
+              latitude: selectedEvent.location.latitude.toString(),
+              longitude: selectedEvent.location.longitude.toString(),
+              userId: selectedEvent.userId,
+            },
+          });
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+          <Text style={[styles.popupTitle, { marginBottom: 0 }]}>{selectedEvent.title}</Text>
+          <Text style={[styles.popupCategory, { marginTop: 0, marginBottom: 0 }]}>{'  '}{selectedEvent.category}</Text>
+        </View>
+        <Text style={styles.popupInfo}>📍 {selectedEvent.address || 'Brak adresu'}</Text>
+        <Text style={styles.popupInfo}>📅 {selectedEvent.date} ⏰ {selectedEvent.time}</Text>
+        <Text style={styles.popupInfo}>{createdText} {distanceText}</Text>
+      </Pressable>
+    </View>
+  );
+}
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.logo}>NearUp</Text>
@@ -314,9 +633,15 @@ function HomeScreen() {
         </View>
       </View>
 
-      {renderActiveFilters()}
-
-      <View style={{ alignItems: 'flex-end', marginBottom: 10 }}>
+      <View style={styles.filtersRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsScrollContent}
+          style={styles.chipsContainer}
+        >
+          {renderActiveFilters()}
+        </ScrollView>
         <Pressable onPress={() => setFilterModalVisible(true)} style={styles.filterButton}>
           <Ionicons name="options" size={20} color="#fff" />
           <Text style={{ color: '#fff', marginLeft: 6 }}>Filtruj</Text>
@@ -333,49 +658,98 @@ function HomeScreen() {
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>Filtry</Text>
+            <Pressable onPress={() => setFilterModalVisible(false)} style={{ position: 'absolute', top: 12, right: 12 }}>
+              <Ionicons name="close" size={20} color="#666" />
+            </Pressable>
             <Text style={{ marginTop: 10 }}>Kategoria</Text>
             <View style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, marginTop: 6 }}>
               <Picker
-                selectedValue={categoryFilter}
-                onValueChange={(itemValue) => setCategoryFilter(itemValue)}>
+                selectedValue={pendingCategoryFilter}
+                onValueChange={(itemValue) => setPendingCategoryFilter(itemValue as EventCategory | '')}>
                 <Picker.Item label="Wybierz kategorię" value="" />
-                <Picker.Item label="Koncert" value="Koncert" />
-                <Picker.Item label="Sport" value="Sport" />
-                <Picker.Item label="Kultura" value="Kultura" />
-                <Picker.Item label="Inne" value="Inne" />
+                {EVENT_CATEGORIES.map((cat) => (
+                  <Picker.Item key={cat} label={cat} value={cat} />
+                ))}
               </Picker>
             </View>
+            <Text style={{ marginTop: 10 }}>Kiedy</Text>
             <Pressable onPress={() => setShowDatePicker(true)} style={styles.input}>
-              <Text>{dateFilter ? dateFilter.toDateString() : 'Wybierz datę'}</Text>
+              <Text>{pendingDateFilter ? pendingDateFilter.toDateString() : 'Wybierz datę'}</Text>
             </Pressable>
             {showDatePicker && (
               <DateTimePicker
-                value={dateFilter || new Date()}
+                value={pendingDateFilter || new Date()}
                 mode="date"
                 display="default"
                 onChange={(e, selectedDate) => {
+                  // Zamknij picker zawsze, ale przy anulowaniu (dismissed) nie zmieniaj pendingDateFilter
                   setShowDatePicker(false);
-                  if (selectedDate) setDateFilter(selectedDate);
+                  // Na Android/iOS event może mieć strukturę { type: 'dismissed' } lub być string 'dismissed'
+                  const dismissed = (
+                    (typeof e === 'object' && e != null && (e as any).type === 'dismissed') ||
+                    (typeof e === 'string' && e === 'dismissed')
+                  );
+                  if (dismissed) return;
+                  if (selectedDate) setPendingDateFilter(selectedDate);
                 }}
               />
             )}
 
+            <Text style={{ marginTop: 10 }}>Odległość (km):</Text>
+            <View style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, marginTop: 6 }}>
+              <Picker
+                selectedValue={pendingDistanceFilter === null ? 'unlimited' : pendingDistanceFilter.toString()}
+                onValueChange={(itemValue) => {
+                  if (itemValue === 'unlimited') {
+                    setPendingDistanceFilter(null);
+                  } else {
+                    const val = Number(itemValue);
+                    setPendingDistanceFilter(val);
+                    // jeśli nie mamy lokalizacji użytkownika, pobierz ją od razu
+                    if (!userLocation) {
+                      fetchLocation();
+                    }
+                  }
+                }}>
+                <Picker.Item label="Bez limitu" value="unlimited" />
+                <Picker.Item label="5 km" value="5" />
+                <Picker.Item label="10 km" value="10" />
+                <Picker.Item label="15 km" value="15" />
+                <Picker.Item label="20 km" value="20" />
+                <Picker.Item label="50 km" value="50" />
+              </Picker>
+            </View>
+
             <Text style={{ marginTop: 10 }}>Sortowanie:</Text>
             <View style={styles.sortButtons}>
-              <Pressable onPress={() => setSortOption('nearest')} style={[styles.sortOption, sortOption === 'nearest' && styles.activeSort]}>
-                <Text style={styles.sortText}>Najbliższe</Text>
+              <Pressable
+                onPress={() => setPendingSortOption('nearest')}
+                style={[styles.sortOption, pendingSortOption === 'nearest' && styles.activeSort]}
+              >
+                <Text style={[styles.sortText, pendingSortOption === 'nearest' && styles.sortTextActive]}>Najbliższe</Text>
               </Pressable>
-              <Pressable onPress={() => setSortOption('latest')} style={[styles.sortOption, sortOption === 'latest' && styles.activeSort]}>
-                <Text style={styles.sortText}>Najnowsze</Text>
+              <Pressable
+                onPress={() => setPendingSortOption('latest')}
+                style={[styles.sortOption, pendingSortOption === 'latest' && styles.activeSort]}
+              >
+                <Text style={[styles.sortText, pendingSortOption === 'latest' && styles.sortTextActive]}>Najnowsze</Text>
               </Pressable>
             </View>
 
             <View style={{ marginTop: 20, flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Pressable onPress={resetFilters} style={styles.resetButton}>
+              <Pressable onPress={() => { resetPendingFilters(); }} style={styles.resetButton}>
                 <Text style={{ color: '#4E6EF2' }}>Resetuj</Text>
               </Pressable>
-              <Pressable onPress={() => setFilterModalVisible(false)} style={styles.confirmButton}>
-                <Text style={{ color: '#fff' }}>Zastosuj</Text>
+              <Pressable onPress={() => {
+                const newData = computeFilteredList(events, pendingCategoryFilter, pendingDateFilter, pendingSortOption, pendingDistanceFilter, userLocation);
+                setFilteredEvents(newData);
+                setCategoryFilter(pendingCategoryFilter);
+                setDateFilter(pendingDateFilter);
+                setSortOption(pendingSortOption);
+                setDistanceFilter(pendingDistanceFilter);
+                setFilterModalVisible(false);
+              }} style={styles.confirmButton}>
+                <Text style={{ color: '#fff' }}>{`Pokaż (${pendingFilteredCount})`}</Text>
               </Pressable>
             </View>
           </View>
@@ -434,6 +808,38 @@ const styles = StyleSheet.create({
   activeFilterText: {
     fontSize: 13,
     color: '#4E6EF2',
+  },
+  filtersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginBottom: 10,
+    gap: 8,
+  },
+  chipsContainer: {
+    flexDirection: 'row',
+    marginRight: 8,
+  },
+  chipsScrollContent: {
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eef1ff',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    marginRight: 8,
+  },
+  chipText: {
+    color: '#4E6EF2',
+    marginRight: 6,
+    fontSize: 13,
+  },
+  chipClose: {
+    padding: 4,
   },
   card: {
     backgroundColor: '#fff',
@@ -506,13 +912,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#444',
     marginBottom: 4,
+    textAlign: 'center',
   },
-  detailsButton: {
-    marginTop: 10,
-    backgroundColor: '#4E6EF2',
-    padding: 10,
-    borderRadius: 8,
-    alignItems: 'center',
+  popupCategory: {
+    marginTop: 8,
+    fontStyle: 'italic',
+    color: '#888',
+    textAlign: 'center',
+    fontSize: 15,
+    marginBottom: 2,
   },
   filterButton: {
     flexDirection: 'row',
@@ -552,14 +960,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#4E6EF2',
     borderRadius: 6,
-    backgroundColor: '#9ed4deff',
+    backgroundColor: '#fff',
+    marginRight: 8,
   },
   activeSort: {
     backgroundColor: '#4E6EF2',
   },
   sortText: {
+    color: '#4E6EF2',
+    fontWeight: '600',
+  },
+  sortTextActive: {
     color: '#fff',
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
   resetButton: {
     borderWidth: 1,

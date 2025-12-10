@@ -21,7 +21,23 @@ import { Picker } from '@react-native-picker/picker';
 import { EVENT_CATEGORIES, EventCategory } from '../types/eventCategory';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
+
+
+import { SafeAreaView } from 'react-native';
+
 export default function CreateEvent() {
+  // Ustaw lokalizację użytkownika jako domyślną po wejściu
+  React.useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      const loc = await Location.getCurrentPositionAsync({});
+      setLocation({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      });
+    })();
+  }, []);
   const router = useRouter();
 
   const [title, setTitle] = useState('');
@@ -67,7 +83,14 @@ export default function CreateEvent() {
       if (results && results.length > 0) {
         const coords = { latitude: results[0].latitude, longitude: results[0].longitude };
         setLocation(coords);
-        setAddress(addressInput);
+        const [geo] = await Location.reverseGeocodeAsync(coords);
+        if (geo) {
+          const addr = `${geo.street || ''} ${geo.name || ''}, ${geo.postalCode || ''} ${geo.city || geo.district || ''}`.trim();
+          setAddress(addr);
+          setAddressInput(addr);
+        } else {
+          setAddress(addressInput);
+        }      
       } else {
         Alert.alert('Nie znaleziono lokalizacji dla podanego adresu.');
       }
@@ -110,119 +133,119 @@ export default function CreateEvent() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 30 }}>
-      <Text style={styles.logo}>NearUp</Text>
-      <Text style={styles.subheader}>Utwórz nowe wydarzenie</Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 250 }}>
+        <Text style={styles.logo}>NearUp</Text>
+        <Text style={styles.subheader}>Utwórz nowe wydarzenie</Text>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Tytuł"
-        value={title}
-        onChangeText={setTitle}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Opis"
-        value={description}
-        onChangeText={setDescription}
-        multiline
-      />
-
-      <Text style={styles.label}>Kategoria:</Text>
-      <View style={styles.pickerWrapper}>
-        <Picker
-          selectedValue={category}
-          onValueChange={(itemValue) => setCategory(itemValue as EventCategory)}
-        >
-          <Picker.Item label="Wybierz kategorię" value="" />
-          {EVENT_CATEGORIES.map(cat => (
-            <Picker.Item key={cat} label={cat} value={cat} />
-          ))}
-        </Picker>
-      </View>
-
-      <Text style={styles.label}>Data wydarzenia:</Text>
-      <Pressable onPress={() => setShowDatePicker(true)} style={styles.pickerButton}>
-        <Text style={styles.pickerText}>
-          {date ? date.toISOString().split('T')[0] : 'Wybierz datę'}
-        </Text>
-      </Pressable>
-      {showDatePicker && (
-        <DateTimePicker
-          value={date || new Date()}
-          mode="date"
-          display="default"
-          onChange={(_, selectedDate) => {
-            setShowDatePicker(false);
-            if (selectedDate) setDate(selectedDate);
-          }}
-        />
-      )}
-
-      <Text style={styles.label}>Godzina wydarzenia:</Text>
-      <Pressable onPress={() => setShowTimePicker(true)} style={styles.pickerButton}>
-        <Text style={styles.pickerText}>
-          {time ? time.toTimeString().split(' ')[0].slice(0, 5) : 'Wybierz godzinę'}
-        </Text>
-      </Pressable>
-      {showTimePicker && (
-        <DateTimePicker
-          value={time || new Date()}
-          mode="time"
-          display="default"
-          onChange={(_, selectedTime) => {
-            setShowTimePicker(false);
-            if (selectedTime) setTime(selectedTime);
-          }}
-        />
-      )}
-
-      <Text style={styles.label}>Adres wydarzenia:</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <TextInput
-          style={[styles.input, { flex: 1, backgroundColor: '#fff', marginBottom: 0 }]}
-          value={addressInput}
-          placeholder="Wpisz adres lub wybierz na mapie"
-          onChangeText={setAddressInput}
-          onBlur={handleAddressSearch}
-          editable={!isGeocoding}
+          style={styles.input}
+          placeholder="Tytuł"
+          value={title}
+          onChangeText={setTitle}
         />
-        <Pressable
-          onPress={handleAddressSearch}
-          style={{ backgroundColor: '#4E6EF2', padding: 10, borderRadius: 8 }}
-          disabled={isGeocoding}
-        >
-          <Text style={{ color: '#fff', fontWeight: 'bold' }}>Szukaj</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Opis"
+          value={description}
+          onChangeText={setDescription}
+          multiline
+        />
+
+        <Text style={styles.label}>Kategoria:</Text>
+        <View style={styles.pickerWrapper}>
+          <Picker
+            selectedValue={category}
+            onValueChange={(itemValue) => setCategory(itemValue as EventCategory)}
+          >
+            <Picker.Item label="Wybierz kategorię" value="" />
+            {EVENT_CATEGORIES.map(cat => (
+              <Picker.Item key={cat} label={cat} value={cat} />
+            ))}
+          </Picker>
+        </View>
+
+        <Text style={styles.label}>Data wydarzenia:</Text>
+        <Pressable onPress={() => setShowDatePicker(true)} style={styles.pickerButton}>
+          <Text style={styles.pickerText}>
+            {date ? date.toISOString().split('T')[0] : 'Wybierz datę'}
+          </Text>
         </Pressable>
-      </View>
-      {address && (
-        <Text style={{ color: '#4E6EF2', marginBottom: 8, marginTop: 2, fontSize: 13 }}>Wybrany adres: {address}</Text>
-      )}
+        {showDatePicker && (
+          <DateTimePicker
+            value={date || new Date()}
+            mode="date"
+            display="default"
+            onChange={(_, selectedDate) => {
+              setShowDatePicker(false);
+              if (selectedDate) setDate(selectedDate);
+            }}
+          />
+        )}
 
-      <Text style={styles.label}>Kliknij na mapie, aby wybrać lokalizację:</Text>
-      <MapView
-        style={styles.map}
-        onPress={handleMapPress}
-        initialRegion={{
-          latitude: location?.latitude || 52.2297,
-          longitude: location?.longitude || 21.0122,
-          latitudeDelta: 0.1,
-          longitudeDelta: 0.1,
-        }}
-        region={location ? {
-          latitude: location.latitude,
-          longitude: location.longitude,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        } : undefined}
-      >
-        {location && <Marker coordinate={location} />}
-      </MapView>
+        <Text style={styles.label}>Godzina wydarzenia:</Text>
+        <Pressable onPress={() => setShowTimePicker(true)} style={styles.pickerButton}>
+          <Text style={styles.pickerText}>
+            {time ? time.toTimeString().split(' ')[0].slice(0, 5) : 'Wybierz godzinę'}
+          </Text>
+        </Pressable>
+        {showTimePicker && (
+          <DateTimePicker
+            value={time || new Date()}
+            mode="time"
+            display="default"
+            onChange={(_, selectedTime) => {
+              setShowTimePicker(false);
+              if (selectedTime) setTime(selectedTime);
+            }}
+          />
+        )}
 
-      
-      <Button title="Utwórz wydarzenie" onPress={handleSubmit} color="#4E6EF2" />
+        <Text style={styles.label}>Adres wydarzenia:</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TextInput
+            style={[styles.input, { flex: 1, backgroundColor: '#fff', marginBottom: 0 }]}
+            value={addressInput}
+            placeholder="Wpisz adres lub wybierz na mapie"
+            onChangeText={setAddressInput}
+            onBlur={handleAddressSearch}
+            editable={!isGeocoding}
+          />
+          <Pressable
+            onPress={handleAddressSearch}
+            style={{ backgroundColor: '#4E6EF2', padding: 10, borderRadius: 8 }}
+            disabled={isGeocoding}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Szukaj</Text>
+          </Pressable>
+        </View>
+        {address && (
+          <Text style={{ color: '#4E6EF2', marginBottom: 8, marginTop: 2, fontSize: 13 }}>Wybrany adres: {address}</Text>
+        )}
 
-    </ScrollView>
+        <Text style={styles.label}>Kliknij na mapie, aby wybrać lokalizację:</Text>
+        <MapView
+          style={styles.map}
+          onPress={handleMapPress}
+          initialRegion={{
+            latitude: location?.latitude || 52.2297,
+            longitude: location?.longitude || 21.0122,
+            latitudeDelta: 0.1,
+            longitudeDelta: 0.1,
+          }}
+          region={location ? {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          } : undefined}
+        >
+          {location && <Marker coordinate={location} />}
+        </MapView>
+
+        <Button title="Utwórz wydarzenie" onPress={handleSubmit} color="#4E6EF2" />
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -283,3 +306,5 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 });
+
+// ...existing code...
