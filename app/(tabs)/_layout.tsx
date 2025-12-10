@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { useRouter } from 'expo-router';
 import { Platform } from 'react-native';
 
 import { HapticTab } from '@/components/HapticTab';
@@ -11,6 +12,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const router = useRouter();
 
   return (
     <Tabs
@@ -38,7 +40,13 @@ export default function TabLayout() {
         name="UserProfile"
         options={{
           title: 'Profil',
-          tabBarIcon: ({ color }) => <MaterialIcons size={28} name="person" color={color} />, 
+          tabBarIcon: ({ color }) => <MaterialIcons size={28} name="person" color={color} />,
+        }}
+        listeners={{
+          tabPress: () => {
+            // replace to clear any search params (show own profile)
+            router.replace('/UserProfile');
+          },
         }}
       />
     </Tabs>

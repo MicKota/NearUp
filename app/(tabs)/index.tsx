@@ -10,6 +10,7 @@ type EventItem = {
   location: { latitude: number; longitude: number };
   userId: string;
   createdAt?: string;
+  participants?: string[];
 };
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { PanResponder } from 'react-native';
@@ -30,8 +31,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { collection, getDocs, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { db, auth } from '../../firebase';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -106,6 +107,7 @@ function HomeScreen() {
           location: d.location || { latitude: 0, longitude: 0 },
           userId: d.userId || '',
           createdAt: d.createdAt || '',
+          participants: d.participants || [],
         };
       });
       setEvents(data);
@@ -288,6 +290,29 @@ function HomeScreen() {
     setSelectedEventIndex(index);
   };
 
+  // Join / leave event
+  const toggleJoinEvent = async (eventId: string, joined: boolean) => {
+    const user = auth.currentUser;
+    if (!user) {
+      router.push('/AuthScreen');
+      return;
+    }
+    try {
+      const eventRef = doc(db, 'events', eventId);
+      const userRef = doc(db, 'users', user.uid);
+      if (!joined) {
+        await updateDoc(eventRef, { participants: arrayUnion(user.uid) });
+        await updateDoc(userRef, { joinedEvents: arrayUnion(eventId) });
+      } else {
+        await updateDoc(eventRef, { participants: arrayRemove(user.uid) });
+        await updateDoc(userRef, { joinedEvents: arrayRemove(eventId) });
+      }
+      await fetchEvents();
+    } catch (e) {
+      console.error('Join error', e);
+    }
+  };
+
   const resetFilters = () => {
     setCategoryFilter('');
     setDateFilter(null);
@@ -419,6 +444,9 @@ function HomeScreen() {
           else createdText = `dodano ${diffMinutes} min temu`;
         }
 
+        const today = new Date().toISOString().split('T')[0];
+        const isPast = item.date && item.date < today;
+
         return (
           <Pressable
             style={styles.card}
@@ -443,9 +471,20 @@ function HomeScreen() {
             <Text style={styles.title}>{item.title}</Text>
             <Text style={styles.info}>{item.description}</Text>
             <Text style={styles.detail}>📍 {item.address || 'Brak adresu'}</Text>
-            <Text style={styles.detail}>📅 {item.date} ⏰ {item.time}</Text>
-            <Text style={styles.category}>{item.category}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+              <Text style={[styles.detail, { flex: 1 }]}>📅 {item.date} ⏰ {item.time}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={styles.categoryPill}>
+                  <Text style={styles.categoryPillText}>{item.category}</Text>
+                </View>
+                <View style={styles.participantsInline}>
+                  <Ionicons name="person" size={14} color="#666" />
+                  <Text style={styles.participantsText}>{(item.participants || []).length}</Text>
+                </View>
+              </View>
+            </View>
             <Text style={styles.detail}>{createdText} {distanceText}</Text>
+            {/* Join removed from list items — joining allowed only in EventDetails */}
           </Pressable>
         );
       }}
@@ -607,12 +646,23 @@ function PopupWithSwipe({
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
           <Text style={[styles.popupTitle, { marginBottom: 0 }]}>{selectedEvent.title}</Text>
-          <Text style={[styles.popupCategory, { marginTop: 0, marginBottom: 0 }]}>{'  '}{selectedEvent.category}</Text>
         </View>
         <Text style={styles.popupInfo}>📍 {selectedEvent.address || 'Brak adresu'}</Text>
-        <Text style={styles.popupInfo}>📅 {selectedEvent.date} ⏰ {selectedEvent.time}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+          <Text style={styles.popupInfo}>📅 {selectedEvent.date} ⏰ {selectedEvent.time}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={styles.categoryPill}>
+              <Text style={styles.categoryPillText}>{selectedEvent.category}</Text>
+            </View>
+            <View style={styles.participantsInline}>
+              <Ionicons name="person" size={14} color="#666" />
+              <Text style={styles.participantsText}>{(selectedEvent.participants || []).length}</Text>
+            </View>
+          </View>
+        </View>
         <Text style={styles.popupInfo}>{createdText} {distanceText}</Text>
       </Pressable>
+      {/* Join button removed from popup; joining allowed only in full EventDetails. Participants shown inline above. */}
     </View>
   );
 }
@@ -621,7 +671,7 @@ function PopupWithSwipe({
       <Text style={styles.logo}>NearUp</Text>
 
       <View style={styles.headerRow}>
-        <Text style={styles.subheader}>Wydarzenia najbliżej Ciebie</Text>
+        <Text style={styles.subheader}>Znajdź wydarzenia dla Siebie</Text>
         <View style={styles.switchContainer}>
           <Pressable onPress={() => setViewMode('list')}>
             <Text style={[styles.switchText, viewMode === 'list' && styles.activeSwitch]}>Lista</Text>
@@ -650,9 +700,11 @@ function PopupWithSwipe({
 
       {viewMode === 'list' ? renderListView() : renderMapView()}
 
-      <Pressable style={styles.addButton} onPress={() => router.push('/CreateEvent')}>
-        <Ionicons name="add" size={32} color="white" />
-      </Pressable>
+      {viewMode !== 'map' && (
+        <Pressable style={styles.addButton} onPress={() => router.push('/CreateEvent')}>
+          <Ionicons name="add" size={32} color="white" />
+        </Pressable>
+      )}
 
       <Modal visible={filterModalVisible} animationType="slide" transparent>
         <View style={styles.modalContainer}>
@@ -869,6 +921,27 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontStyle: 'italic',
     color: '#888',
+  },
+  categoryPill: {
+    backgroundColor: '#eef1ff',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  categoryPillText: {
+    color: '#4E6EF2',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  participantsInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  participantsText: {
+    color: '#666',
+    marginLeft: 6,
+    fontSize: 13,
   },
   addButton: {
     position: 'absolute',

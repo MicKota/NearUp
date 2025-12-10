@@ -3,9 +3,7 @@ import { auth } from './firebase';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AuthScreen from './app/AuthScreen';
-import HomeScreen from './app/(tabs)/index';
-import CreateEvent from './app/CreateEvent';
-import UserProfile from './app/(tabs)/UserProfile';
+import { Stack as ExpoStack } from 'expo-router';
 
 const Stack = createNativeStackNavigator();
 
@@ -29,11 +27,7 @@ export default function App() {
         {!user ? (
           <Stack.Screen name="AuthScreen" component={AuthScreen} />
         ) : (
-          <>
-            <Stack.Screen name="Home" component={HomeScreen} />
-            <Stack.Screen name="CreateEvent" component={CreateEvent} />
-            <Stack.Screen name="UserProfile" component={UserProfile} />
-          </>
+          <Stack.Screen name="Root" component={ExpoStack} />
         )}
       </Stack.Navigator>
     </NavigationContainer>

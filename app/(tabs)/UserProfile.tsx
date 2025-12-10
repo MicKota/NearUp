@@ -1,19 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Image, Button, TextInput, ScrollView, Alert, Pressable, TouchableOpacity } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { View, Text, StyleSheet, Image, Button, TextInput, ScrollView, Alert, Pressable } from 'react-native';
+import { useRouter } from 'expo-router';
 import { db, auth } from '../../firebase';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import * as ImagePicker from 'expo-image-picker';
 
 export default function UserProfile() {
-  const params = useLocalSearchParams();
   const router = useRouter();
   const user = auth.currentUser;
-  // Ustal userId: jeśli nie ma w params, użyj aktualnego użytkownika
-  const userId = params.userId || (user ? user.uid : undefined);
-  const editParam = params.edit;
+  
   const [profile, setProfile] = useState<any>(null);
-  const [edit, setEdit] = useState(editParam === 'true');
+  const [edit, setEdit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [avatar, setAvatar] = useState('');
@@ -21,6 +18,7 @@ export default function UserProfile() {
   const [description, setDescription] = useState('');
   const [favoriteCategories, setFavoriteCategories] = useState<string[]>([]);
   const [userEvents, setUserEvents] = useState<any[]>([]);
+  const [joinedEvents, setJoinedEvents] = useState<any[]>([]);
 
   // Sprawdzanie zalogowania
   useEffect(() => {
@@ -30,12 +28,10 @@ export default function UserProfile() {
     }
   }, [user]);
 
-  const isOwnProfile = user && user.uid === userId;
-
   useEffect(() => {
     async function fetchProfileAndEvents() {
-      if (userId) {
-        const userRef = doc(db, 'users', userId as string);
+      if (user?.uid) {
+        const userRef = doc(db, 'users', user.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
           const data = userSnap.data();
@@ -46,20 +42,25 @@ export default function UserProfile() {
           setFavoriteCategories(data.favoriteCategories || []);
         }
         // Fetch events created by this user
-        const eventsQuery = query(collection(db, 'events'), where('userId', '==', userId));
+        const eventsQuery = query(collection(db, 'events'), where('userId', '==', user.uid));
         const eventsSnap = await getDocs(eventsQuery);
         const events = eventsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setUserEvents(events);
+        // Fetch events the user joined
+        const joinedQuery = query(collection(db, 'events'), where('participants', 'array-contains', user.uid));
+        const joinedSnap = await getDocs(joinedQuery);
+        const joined = joinedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setJoinedEvents(joined);
       }
       setLoading(false);
     }
     fetchProfileAndEvents();
-  }, [userId]);
+  }, [user?.uid]);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'users', userId as string), {
+      await updateDoc(doc(db, 'users', user!.uid), {
         avatar,
         nick,
         description,
@@ -91,39 +92,57 @@ export default function UserProfile() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ alignItems: 'center', paddingBottom: 40, paddingTop: 20 }}>
       <View style={{ flexDirection: 'row', width: '100%', alignItems: 'center', marginBottom: 10 }}>
+        {edit ? (
+          <Pressable onPress={() => setEdit(false)} style={styles.editBtnLeft}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Gotowe</Text></Pressable>
+        ) : (
+          <Pressable onPress={() => setEdit(true)} style={styles.editBtnLeft}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Edytuj</Text></Pressable>
+        )}
         <View style={{ flex: 1 }} />
-        {isOwnProfile && <Pressable onPress={handleLogout} style={styles.logoutBtn}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Wyloguj się</Text></Pressable>}
+        <Pressable onPress={handleLogout} style={styles.logoutBtn}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Wyloguj się</Text></Pressable>
       </View>
       <Image source={avatar ? { uri: avatar } : require('../../assets/images/avatar-placeholder.png')} style={styles.avatar} />
-      {isOwnProfile && edit && (
+      {edit && (
         <Button title="Zmień zdjęcie" onPress={pickImage} />
       )}
       {edit ? (
         <TextInput style={styles.input} value={nick} onChangeText={setNick} placeholder="Nick" />
       ) : (
-        <Text style={styles.nick}>{profile.nick}</Text>
+        <Text style={styles.nick}>{profile?.nick}</Text>
       )}
       {edit ? (
         <TextInput style={styles.input} value={description} onChangeText={setDescription} placeholder="Opis/zainteresowania" multiline />
       ) : (
-        <Text style={styles.desc}>{profile.description || 'Brak opisu'}</Text>
+        <Text style={styles.desc}>{profile?.description || 'Brak opisu'}</Text>
       )}
       <Text style={styles.label}>Ulubione kategorie:</Text>
       {edit ? (
         <TextInput style={styles.input} value={favoriteCategories.join(', ')} onChangeText={v => setFavoriteCategories(v.split(',').map(s => s.trim()))} placeholder="np. Sport, Kultura" />
       ) : (
-        <Text>{(profile.favoriteCategories || []).join(', ') || 'Brak'}</Text>
+        <Text>{(profile?.favoriteCategories || []).join(', ') || 'Brak'}</Text>
       )}
-      {isOwnProfile && (
-        edit ? (
-          <Button title={saving ? 'Zapisywanie...' : 'Zapisz'} onPress={handleSave} disabled={saving} />
-        ) : (
-          <Button title="Edytuj profil" onPress={() => setEdit(true)} />
-        )
+      {edit && (
+        <Button title={saving ? 'Zapisywanie...' : 'Zapisz'} onPress={handleSave} disabled={saving} />
       )}
-      <Text style={styles.label}>Wydarzenia utworzone przez użytkownika:</Text>
+      <Text style={styles.label}>Wydarzenia, do których dołączyłeś:</Text>
+      {joinedEvents.length === 0 ? (
+        <Text style={{ color: '#888', marginBottom: 10 }}>Brak dołączonych ereigneń.</Text>
+      ) : (
+        joinedEvents.map(event => (
+          <Pressable
+            key={event.id}
+            style={styles.eventCard}
+            onPress={() => router.push({ pathname: '/EventDetails', params: { id: event.id } })}
+          >
+            <Text style={styles.eventTitle}>{event.title}</Text>
+            <Text style={styles.eventInfo}>{event.description}</Text>
+            <Text style={styles.eventDetail}>📅 {event.date} ⏰ {event.time}</Text>
+            <Text style={styles.eventCategory}>{event.category}</Text>
+          </Pressable>
+        ))
+      )}
+      <Text style={styles.label}>Wydarzenia które stworzyłeś:</Text>
       {userEvents.length === 0 ? (
-        <Text style={{ color: '#888', marginBottom: 10 }}>Brak utworzonych wydarzeń.</Text>
+        <Text style={{ color: '#888', marginBottom: 10 }}>Brak utworzonych ereigneń.</Text>
       ) : (
         userEvents.map(event => {
           // Oblicz ile czasu temu utworzono wydarzenie
@@ -175,13 +194,10 @@ export default function UserProfile() {
 }
 
 const styles = StyleSheet.create({
-  creatorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#eef1ff',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 10,
+  editBtnLeft: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#4E6EF2',
   },
   logoutBtn: {
     padding: 8,
