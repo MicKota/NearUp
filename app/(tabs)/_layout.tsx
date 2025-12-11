@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -49,6 +50,13 @@ export default function TabLayout() {
           },
         }}
       />
+        <Tabs.Screen
+          name="Chats"
+          options={{
+            title: 'Czaty',
+            tabBarIcon: ({ color }) => <Ionicons size={28} name="chatbubbles" color={color} />,
+          }}
+        />
     </Tabs>
   );
 }
