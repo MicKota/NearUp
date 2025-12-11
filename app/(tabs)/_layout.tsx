@@ -38,25 +38,19 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="Chats"
+        options={{
+          title: 'Czaty',
+          tabBarIcon: ({ color }) => <Ionicons size={28} name="chatbubbles" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="UserProfile"
         options={{
           title: 'Profil',
           tabBarIcon: ({ color }) => <MaterialIcons size={28} name="person" color={color} />,
         }}
-        listeners={{
-          tabPress: () => {
-            // replace to clear any search params (show own profile)
-            router.replace('/UserProfile');
-          },
-        }}
       />
-        <Tabs.Screen
-          name="Chats"
-          options={{
-            title: 'Czaty',
-            tabBarIcon: ({ color }) => <Ionicons size={28} name="chatbubbles" color={color} />,
-          }}
-        />
     </Tabs>
   );
 }

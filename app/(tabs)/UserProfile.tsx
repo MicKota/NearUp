@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Image, Button, TextInput, ScrollView, Alert, Pressable } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, Image, Button, TextInput, ScrollView, Alert, Pressable, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { db, auth } from '../../firebase';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
@@ -28,34 +28,43 @@ export default function UserProfile() {
     }
   }, [user]);
 
-  useEffect(() => {
-    async function fetchProfileAndEvents() {
-      if (user?.uid) {
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          const data = userSnap.data();
-          setProfile(data);
-          setAvatar(data.avatar || '');
-          setNick(data.nick || '');
-          setDescription(data.description || '');
-          setFavoriteCategories(data.favoriteCategories || []);
-        }
-        // Fetch events created by this user
-        const eventsQuery = query(collection(db, 'events'), where('userId', '==', user.uid));
-        const eventsSnap = await getDocs(eventsQuery);
-        const events = eventsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setUserEvents(events);
-        // Fetch events the user joined
-        const joinedQuery = query(collection(db, 'events'), where('participants', 'array-contains', user.uid));
-        const joinedSnap = await getDocs(joinedQuery);
-        const joined = joinedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setJoinedEvents(joined);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchProfileAndEvents = useCallback(async () => {
+    setLoading(true);
+    if (user?.uid) {
+      const userRef = doc(db, 'users', user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const data = userSnap.data();
+        setProfile(data);
+        setAvatar(data.avatar || '');
+        setNick(data.nick || '');
+        setDescription(data.description || '');
+        setFavoriteCategories(data.favoriteCategories || []);
       }
-      setLoading(false);
+      // Fetch events created by this user
+      const eventsQuery = query(collection(db, 'events'), where('userId', '==', user.uid));
+      const eventsSnap = await getDocs(eventsQuery);
+      const events = eventsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setUserEvents(events);
+      // Fetch events the user joined
+      const joinedQuery = query(collection(db, 'events'), where('participants', 'array-contains', user.uid));
+      const joinedSnap = await getDocs(joinedQuery);
+      const joined = joinedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setJoinedEvents(joined);
     }
-    fetchProfileAndEvents();
+    setLoading(false);
   }, [user?.uid]);
+
+  useEffect(() => {
+    fetchProfileAndEvents();
+  }, [fetchProfileAndEvents]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchProfileAndEvents().finally(() => setRefreshing(false));
+  }, [fetchProfileAndEvents]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -90,7 +99,11 @@ export default function UserProfile() {
   if (!profile) return <View style={styles.center}><Text>Nie znaleziono użytkownika</Text></View>;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ alignItems: 'center', paddingBottom: 40, paddingTop: 20 }}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ alignItems: 'center', paddingBottom: 40, paddingTop: 20 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
       <View style={{ flexDirection: 'row', width: '100%', alignItems: 'center', marginBottom: 10 }}>
         {edit ? (
           <Pressable onPress={() => setEdit(false)} style={styles.editBtnLeft}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Gotowe</Text></Pressable>
@@ -123,9 +136,9 @@ export default function UserProfile() {
       {edit && (
         <Button title={saving ? 'Zapisywanie...' : 'Zapisz'} onPress={handleSave} disabled={saving} />
       )}
-      <Text style={styles.label}>Wydarzenia, do których dołączyłeś:</Text>
+      <Text style={styles.label}>Wydarzenia do których dołączyłeś:</Text>
       {joinedEvents.length === 0 ? (
-        <Text style={{ color: '#888', marginBottom: 10 }}>Brak dołączonych ereigneń.</Text>
+        <Text style={{ color: '#888', marginBottom: 10 }}>Nie dołączyłeś jeszcze do żadnego wydarzenia.</Text>
       ) : (
         joinedEvents.map(event => (
           <Pressable
@@ -140,9 +153,9 @@ export default function UserProfile() {
           </Pressable>
         ))
       )}
-      <Text style={styles.label}>Wydarzenia które stworzyłeś:</Text>
+      <Text style={styles.label}>Wydarzenia które dodałeś:</Text>
       {userEvents.length === 0 ? (
-        <Text style={{ color: '#888', marginBottom: 10 }}>Brak utworzonych ereigneń.</Text>
+        <Text style={{ color: '#888', marginBottom: 10 }}>Nie dodałeś jeszcze żadnego wydarzenia.</Text>
       ) : (
         userEvents.map(event => {
           // Oblicz ile czasu temu utworzono wydarzenie

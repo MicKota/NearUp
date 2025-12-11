@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, SafeAreaView } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, SafeAreaView, RefreshControl, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { db, auth } from '../../firebase';
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
@@ -20,45 +20,52 @@ export default function Chats() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchConversations = useCallback(async () => {
+    if (!user) {
+      router.replace('/AuthScreen');
+      return;
+    }
+
+    try {
+      // Pobierz wszystkie wydarzenia do których użytkownik dołączył
+      const eventsQuery = query(
+        collection(db, 'events'),
+        where('participants', 'array-contains', user.uid)
+      );
+      const eventsSnap = await getDocs(eventsQuery);
+      
+      const convs: Conversation[] = [];
+      
+      for (const eventDoc of eventsSnap.docs) {
+        const eventData = eventDoc.data();
+        convs.push({
+          eventId: eventDoc.id,
+          eventTitle: eventData.title || 'Brak nazwy',
+          eventDate: eventData.date || '',
+          participantsCount: (eventData.participants || []).length,
+          lastMessage: undefined,
+          lastMessageTime: undefined,
+        });
+      }
+      
+      setConversations(convs);
+    } catch (error) {
+      console.error('Błąd pobierania rozmów:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, router]);
+
   useEffect(() => {
-    const fetchConversations = async () => {
-      if (!user) {
-        router.replace('/AuthScreen');
-        return;
-      }
-
-      try {
-        // Pobierz wszystkie wydarzenia do których użytkownik dołączył
-        const eventsQuery = query(
-          collection(db, 'events'),
-          where('participants', 'array-contains', user.uid)
-        );
-        const eventsSnap = await getDocs(eventsQuery);
-        
-        const convs: Conversation[] = [];
-        
-        for (const eventDoc of eventsSnap.docs) {
-          const eventData = eventDoc.data();
-          convs.push({
-            eventId: eventDoc.id,
-            eventTitle: eventData.title || 'Brak nazwy',
-            eventDate: eventData.date || '',
-            participantsCount: (eventData.participants || []).length,
-            lastMessage: undefined,
-            lastMessageTime: undefined,
-          });
-        }
-        
-        setConversations(convs);
-      } catch (error) {
-        console.error('Błąd pobierania rozmów:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchConversations();
-  }, [user]);
+  }, [fetchConversations]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchConversations().finally(() => setRefreshing(false));
+  }, [fetchConversations]);
 
   if (!user) return null;
 
@@ -76,13 +83,14 @@ export default function Chats() {
     <SafeAreaView style={styles.container}>
       <Text style={styles.header}>Czaty grupowe</Text>
       {conversations.length === 0 ? (
-        <View style={styles.centerContent}>
+        <ScrollView contentContainerStyle={styles.centerContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
           <Text style={styles.emptyText}>Nie dołączyłeś jeszcze do żadnych wydarzeń</Text>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={conversations}
           keyExtractor={(item) => item.eventId}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item }) => (
             <Pressable
               style={styles.conversationCard}
