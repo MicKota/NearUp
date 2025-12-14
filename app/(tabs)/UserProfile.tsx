@@ -1,8 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Image, Button, TextInput, ScrollView, Alert, Pressable, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, Image, TextInput, ScrollView, Alert, Pressable, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { db, auth } from '../../firebase';
+import CategorySelector from '../../components/CategorySelector';
+import { NICK_MIN_LENGTH, NICK_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from '../../constants/Validation';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { updatePassword } from 'firebase/auth';
 import * as ImagePicker from 'expo-image-picker';
 
 export default function UserProfile() {
@@ -19,6 +22,10 @@ export default function UserProfile() {
   const [favoriteCategories, setFavoriteCategories] = useState<string[]>([]);
   const [userEvents, setUserEvents] = useState<any[]>([]);
   const [joinedEvents, setJoinedEvents] = useState<any[]>([]);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
 
   // Sprawdzanie zalogowania
   useEffect(() => {
@@ -69,6 +76,22 @@ export default function UserProfile() {
   const handleSave = async () => {
     setSaving(true);
     try {
+      // Validate inputs
+      if (!nick || nick.length < NICK_MIN_LENGTH) {
+        Alert.alert(`Nick musi mieć co najmniej ${NICK_MIN_LENGTH} znaki`);
+        setSaving(false);
+        return;
+      }
+      if (nick.length > NICK_MAX_LENGTH) {
+        Alert.alert(`Nick może mieć maksymalnie ${NICK_MAX_LENGTH} znaków`);
+        setSaving(false);
+        return;
+      }
+      if (description && description.length > DESCRIPTION_MAX_LENGTH) {
+        Alert.alert(`Opis może mieć maksymalnie ${DESCRIPTION_MAX_LENGTH} znaków`);
+        setSaving(false);
+        return;
+      }
       await updateDoc(doc(db, 'users', user!.uid), {
         avatar,
         nick,
@@ -77,6 +100,8 @@ export default function UserProfile() {
       });
       setEdit(false);
       Alert.alert('Zapisano zmiany!');
+      // Refresh profile and related data so UI shows latest values
+      await fetchProfileAndEvents();
     } catch (e) {
       Alert.alert('Błąd podczas zapisu.');
     }
@@ -95,6 +120,45 @@ export default function UserProfile() {
     router.replace('/AuthScreen');
   };
 
+  const handleCancel = () => {
+    // Revert local edits and leave edit mode without saving
+    setAvatar(profile?.avatar || '');
+    setNick(profile?.nick || '');
+    setDescription(profile?.description || '');
+    setFavoriteCategories(profile?.favoriteCategories || []);
+    setEdit(false);
+  };
+
+  const handleChangePassword = async () => {
+    if (newPassword.length < 6) {
+      Alert.alert('Hasło musi mieć co najmniej 6 znaków');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Hasła nie są identyczne');
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      if (auth.currentUser) {
+        await updatePassword(auth.currentUser, newPassword as string);
+        Alert.alert('Hasło zmienione pomyślnie');
+        setShowChangePassword(false);
+        setNewPassword('');
+        setConfirmPassword('');
+      }
+    } catch (e: any) {
+      if (e?.code === 'auth/requires-recent-login') {
+        Alert.alert('W celu zmiany hasła wymagana jest ponowna autoryzacja. Zaloguj się ponownie.');
+        await auth.signOut();
+        router.replace('/AuthScreen');
+      } else {
+        Alert.alert('Błąd podczas zmiany hasła', e?.message || String(e));
+      }
+    }
+    setChangingPassword(false);
+  };
+
   if (loading) return <View style={styles.center}><Text>Ładowanie...</Text></View>;
   if (!profile) return <View style={styles.center}><Text>Nie znaleziono użytkownika</Text></View>;
 
@@ -106,58 +170,98 @@ export default function UserProfile() {
     >
       <View style={{ flexDirection: 'row', width: '100%', alignItems: 'center', marginBottom: 10 }}>
         {edit ? (
-          <Pressable onPress={() => setEdit(false)} style={styles.editBtnLeft}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Gotowe</Text></Pressable>
+          <Pressable onPress={() => { if (!saving) handleSave(); }} style={styles.editBtnLeft}>
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>{saving ? 'Zapisywanie...' : 'Zapisz'}</Text>
+          </Pressable>
         ) : (
           <Pressable onPress={() => setEdit(true)} style={styles.editBtnLeft}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Edytuj</Text></Pressable>
         )}
         <View style={{ flex: 1 }} />
-        <Pressable onPress={handleLogout} style={styles.logoutBtn}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Wyloguj się</Text></Pressable>
+        {edit ? (
+          <Pressable onPress={handleCancel} style={styles.cancelBtn}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Anuluj</Text></Pressable>
+        ) : (
+          <Pressable onPress={handleLogout} style={styles.logoutBtn}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Wyloguj się</Text></Pressable>
+        )}
       </View>
       <Image source={avatar ? { uri: avatar } : require('../../assets/images/avatar-placeholder.png')} style={styles.avatar} />
       {edit && (
-        <Button title="Zmień zdjęcie" onPress={pickImage} />
+        <Pressable onPress={pickImage} style={styles.changePicBtn}>
+          <Text style={styles.changePicBtnText}>Zmień zdjęcie</Text>
+        </Pressable>
+      )}
+      {edit && (
+        <>
+          <Text style={styles.label}>Email:</Text>
+          <TextInput style={[styles.input, styles.disabledInput]} value={user?.email || ''} editable={false} selectTextOnFocus={false} />
+          <Pressable onPress={() => setShowChangePassword(s => !s)} style={styles.changePassBtn}>
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>{showChangePassword ? 'Anuluj zmianę hasła' : 'Zmień hasło'}</Text>
+          </Pressable>
+          {showChangePassword && (
+            <View style={{ alignItems: 'center', marginTop: 8 }}>
+              <Text style={styles.label}>Nowe hasło:</Text>
+              <TextInput placeholder="Nowe hasło" secureTextEntry style={styles.input} value={newPassword} onChangeText={setNewPassword} />
+              <Text style={styles.label}>Powtórz nowe hasło:</Text>
+              <TextInput placeholder="Powtórz nowe hasło" secureTextEntry style={styles.input} value={confirmPassword} onChangeText={setConfirmPassword} />
+              <Pressable onPress={handleChangePassword} style={styles.savePassBtn}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>{changingPassword ? 'Zmiana...' : 'Zapisz hasło'}</Text>
+              </Pressable>
+            </View>
+          )}
+        </>
       )}
       {edit ? (
-        <TextInput style={styles.input} value={nick} onChangeText={setNick} placeholder="Nick" />
+        <>
+          <Text style={styles.label}>Nick:</Text>
+          <TextInput style={styles.input} value={nick} onChangeText={setNick} placeholder="Nick" maxLength={NICK_MAX_LENGTH} />
+        </>
       ) : (
         <Text style={styles.nick}>{profile?.nick}</Text>
       )}
       {edit ? (
-        <TextInput style={styles.input} value={description} onChangeText={setDescription} placeholder="Opis/zainteresowania" multiline />
+        <>
+          <Text style={styles.label}>Opis:</Text>
+          <TextInput style={styles.input} value={description} onChangeText={setDescription} placeholder="Opis/zainteresowania" multiline maxLength={DESCRIPTION_MAX_LENGTH} />
+        </>
       ) : (
         <Text style={styles.desc}>{profile?.description || 'Brak opisu'}</Text>
       )}
-      <Text style={styles.label}>Ulubione kategorie:</Text>
       {edit ? (
-        <TextInput style={styles.input} value={favoriteCategories.join(', ')} onChangeText={v => setFavoriteCategories(v.split(',').map(s => s.trim()))} placeholder="np. Sport, Kultura" />
+        <CategorySelector selected={favoriteCategories} onChange={setFavoriteCategories} />
       ) : (
-        <Text>{(profile?.favoriteCategories || []).join(', ') || 'Brak'}</Text>
+        <>
+          <Text style={styles.label}>Ulubione kategorie:</Text>
+          <Text>{(profile?.favoriteCategories || []).join(', ') || 'Brak'}</Text>
+        </>
       )}
-      {edit && (
-        <Button title={saving ? 'Zapisywanie...' : 'Zapisz'} onPress={handleSave} disabled={saving} />
+      {/* save button moved to top-left; removed duplicate bottom button */}
+      {!edit && (
+        <>
+          <Text style={styles.label}>Wydarzenia do których dołączyłeś:</Text>
+          {joinedEvents.length === 0 ? (
+            <Text style={{ color: '#888', marginBottom: 10 }}>Nie dołączyłeś jeszcze do żadnego wydarzenia.</Text>
+          ) : (
+            joinedEvents.map(event => (
+              <Pressable
+                key={event.id}
+                style={styles.eventCard}
+                onPress={() => router.push({ pathname: '/EventDetails', params: { id: event.id } })}
+              >
+                <Text style={styles.eventTitle}>{event.title}</Text>
+                <Text style={styles.eventInfo}>{event.description}</Text>
+                <Text style={styles.eventDetail}>📅 {event.date} ⏰ {event.time}</Text>
+                <Text style={styles.eventCategory}>{event.category}</Text>
+              </Pressable>
+            ))
+          )}
+        </>
       )}
-      <Text style={styles.label}>Wydarzenia do których dołączyłeś:</Text>
-      {joinedEvents.length === 0 ? (
-        <Text style={{ color: '#888', marginBottom: 10 }}>Nie dołączyłeś jeszcze do żadnego wydarzenia.</Text>
-      ) : (
-        joinedEvents.map(event => (
-          <Pressable
-            key={event.id}
-            style={styles.eventCard}
-            onPress={() => router.push({ pathname: '/EventDetails', params: { id: event.id } })}
-          >
-            <Text style={styles.eventTitle}>{event.title}</Text>
-            <Text style={styles.eventInfo}>{event.description}</Text>
-            <Text style={styles.eventDetail}>📅 {event.date} ⏰ {event.time}</Text>
-            <Text style={styles.eventCategory}>{event.category}</Text>
-          </Pressable>
-        ))
-      )}
-      <Text style={styles.label}>Wydarzenia które dodałeś:</Text>
-      {userEvents.length === 0 ? (
-        <Text style={{ color: '#888', marginBottom: 10 }}>Nie dodałeś jeszcze żadnego wydarzenia.</Text>
-      ) : (
-        userEvents.map(event => {
+      {!edit && (
+        <>
+          <Text style={styles.label}>Wydarzenia które dodałeś:</Text>
+          {userEvents.length === 0 ? (
+            <Text style={{ color: '#888', marginBottom: 10 }}>Nie dodałeś jeszcze żadnego wydarzenia.</Text>
+          ) : (
+            userEvents.map(event => {
           // Oblicz ile czasu temu utworzono wydarzenie
           let createdText = '';
           if (event.createdAt) {
@@ -200,7 +304,9 @@ export default function UserProfile() {
               <Text style={styles.eventDetail}>{createdText}</Text>
             </Pressable>
           );
-        })
+            })
+          )}
+        </>
       )}
     </ScrollView>
   );
@@ -216,6 +322,11 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 8,
     backgroundColor: '#4E6EF2',
+  },
+  cancelBtn: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#888',
   },
   container: {
     flex: 1,
@@ -290,5 +401,31 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontStyle: 'italic',
     color: '#888',
+  },
+  changePicBtn: {
+    backgroundColor: '#4E6EF2',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  changePicBtnText: { color: '#fff', fontWeight: '600' },
+  changePassBtn: {
+    backgroundColor: '#6C63FF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 6,
+  },
+  savePassBtn: {
+    backgroundColor: '#4E6EF2',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  disabledInput: {
+    backgroundColor: '#f3f3f3',
+    color: '#666',
   },
 });

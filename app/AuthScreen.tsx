@@ -3,6 +3,8 @@ import { View, Text, TextInput, Button, StyleSheet, Alert, Pressable, Image } fr
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { setDoc, doc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import CategorySelector from '../components/CategorySelector';
+import { NICK_MIN_LENGTH, NICK_MAX_LENGTH } from '../constants/Validation';
 import { useRouter } from 'expo-router';
 
 export default function AuthScreen() {
@@ -10,6 +12,7 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nick, setNick] = useState('');
+  const [favoriteCategories, setFavoriteCategories] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -22,13 +25,24 @@ export default function AuthScreen() {
       if (isLogin) {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
+        // Validate nick length
+        if (!nick || nick.length < NICK_MIN_LENGTH) {
+          Alert.alert(`Nick musi mieć co najmniej ${NICK_MIN_LENGTH} znaki`);
+          setLoading(false);
+          return;
+        }
+        if (nick.length > NICK_MAX_LENGTH) {
+          Alert.alert(`Nick może mieć maksymalnie ${NICK_MAX_LENGTH} znaków`);
+          setLoading(false);
+          return;
+        }
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         // Zapisz nick do Firestore
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           nick,
           email,
           avatar: '',
-          favoriteCategories: [],
+          favoriteCategories,
           description: '',
         });
         // Przekieruj na ekran edycji profilu
@@ -46,12 +60,16 @@ export default function AuthScreen() {
       <Text style={styles.logo}>NearUp</Text>
       <Text style={styles.header}>{isLogin ? 'Logowanie' : 'Rejestracja'}</Text>
       {!isLogin && (
-        <TextInput
-          style={styles.input}
-          placeholder="Nick (unikalny)"
-          value={nick}
-          onChangeText={setNick}
-        />
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder="Nick (unikalny)"
+            value={nick}
+            onChangeText={setNick}
+            maxLength={NICK_MAX_LENGTH}
+          />
+          <CategorySelector selected={favoriteCategories} onChange={setFavoriteCategories} />
+        </>
       )}
       <TextInput
         style={styles.input}
