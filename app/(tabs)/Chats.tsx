@@ -13,6 +13,7 @@ type Conversation = {
   lastMessage?: string;
   lastMessageAuthor?: string;
   lastMessageTime?: string;
+  lastMessageTimestamp?: number;
   participantsCount: number;
   unreadCount: number;
 };
@@ -21,7 +22,9 @@ export default function Chats() {
   const router = useRouter();
   const user = auth.currentUser;
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [pastConversations, setPastConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -48,6 +51,7 @@ export default function Chats() {
         let lastMessage: string | undefined;
         let lastMessageAuthor: string | undefined;
         let lastMessageTime: string | undefined;
+        let lastMessageTimestamp: number | undefined;
         
         try {
           const messagesQuery = query(
@@ -58,9 +62,12 @@ export default function Chats() {
           const messagesSnap = await getDocs(messagesQuery);
           
           if (!messagesSnap.empty) {
-            const lastMsg = messagesSnap.docs[0].data();
+            const lastMsgDoc = messagesSnap.docs[0];
+            const lastMsg = lastMsgDoc.data();
             lastMessage = lastMsg.text;
+            // store localized time for display and raw timestamp for sorting
             lastMessageTime = lastMsg.timestamp?.toDate().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+            lastMessageTimestamp = lastMsg.timestamp?.toMillis ? lastMsg.timestamp.toMillis() : (lastMsg.timestamp ? new Date(lastMsg.timestamp).getTime() : undefined);
             
             // Pobierz nick autora (preferuj `nick` zamiast email)
             if (lastMsg.userId) {
@@ -111,11 +118,27 @@ export default function Chats() {
           lastMessage,
           lastMessageAuthor,
           lastMessageTime,
+          lastMessageTimestamp,
           unreadCount,
         });
       }
       
-      setConversations(convs);
+      // split into active vs past (based on eventDate) and sort each by lastMessageTimestamp desc
+      const active: Conversation[] = [];
+      const past: Conversation[] = [];
+      const now = new Date();
+      for (const c of convs) {
+        const d = new Date(c.eventDate);
+        if (!isNaN(d.getTime()) && d < now) past.push(c);
+        else active.push(c);
+      }
+
+      const sortByTimeDesc = (arr: Conversation[]) => arr.sort((a, b) => (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0));
+      sortByTimeDesc(active);
+      sortByTimeDesc(past);
+
+      setConversations(active);
+      setPastConversations(past);
     } catch (error) {
       console.error('Błąd pobierania rozmów:', error);
     } finally {
@@ -135,6 +158,49 @@ export default function Chats() {
     setRefreshing(true);
     fetchConversations().finally(() => setRefreshing(false));
   }, [fetchConversations]);
+
+  const renderConversationCard = (item: Conversation) => (
+    <Pressable
+      style={[
+        styles.conversationCard,
+        item.unreadCount > 0 && styles.conversationCardUnread,
+      ]}
+      onPress={() => router.push(`/GroupChat?eventId=${item.eventId}`)}
+    >
+      <View style={styles.conversationContent}>
+        <View style={styles.conversationHeader}>
+          <Text style={[
+            styles.conversationTitle,
+            item.unreadCount > 0 && styles.conversationTitleUnread,
+          ]}>
+            {item.eventTitle}
+          </Text>
+          {item.unreadCount > 0 && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.rowMeta}>
+          <Text style={styles.conversationDate}>📅 {item.eventDate}</Text>
+          <Text style={styles.participantsCount}>
+            <Ionicons name="people" size={14} color="#666" /> {item.participantsCount}
+          </Text>
+        </View>
+        {item.lastMessage && (
+          <Text style={[
+            styles.lastMessage,
+            item.unreadCount > 0 && styles.lastMessageUnread,
+          ]} numberOfLines={1}>
+            {item.lastMessageAuthor && `${item.lastMessageAuthor}: `}
+            {item.lastMessage}
+            {item.lastMessageTime ? ` · ${item.lastMessageTime}` : ''}
+          </Text>
+        )}
+      </View>
+      <Ionicons name="chevron-forward" size={20} color="#4E6EF2" />
+    </Pressable>
+  );
 
   if (!user) return null;
 
@@ -205,6 +271,22 @@ export default function Chats() {
           contentContainerStyle={styles.listContent}
         />
       )}
+      {/* Archive (past events) toggle */}
+      <View style={styles.archiveContainer}>
+        <Pressable style={styles.archiveHeader} onPress={() => setArchiveOpen((s) => !s)}>
+          <Text style={styles.archiveTitle}>Zakończone wydarzenia ({pastConversations.length})</Text>
+          <Ionicons name={archiveOpen ? 'chevron-up' : 'chevron-down'} size={20} color="#666" />
+        </Pressable>
+        {archiveOpen && pastConversations.length > 0 && (
+          <View style={styles.archiveList}>
+            {pastConversations.map((p) => (
+              <View key={p.eventId} style={{ marginBottom: 8 }}>
+                {renderConversationCard(p)}
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
@@ -320,4 +402,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  archiveContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+  },
+  archiveHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  archiveTitle: { fontSize: 15, color: '#444', fontWeight: '600' },
+  archiveList: { marginTop: 8 },
 });
