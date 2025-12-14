@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, SafeAreaView, RefreshControl, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { db, auth } from '../../firebase';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, orderBy, limit } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 
 type Conversation = {
@@ -10,8 +11,10 @@ type Conversation = {
   eventTitle: string;
   eventDate: string;
   lastMessage?: string;
+  lastMessageAuthor?: string;
   lastMessageTime?: string;
   participantsCount: number;
+  unreadCount: number;
 };
 
 export default function Chats() {
@@ -40,13 +43,75 @@ export default function Chats() {
       
       for (const eventDoc of eventsSnap.docs) {
         const eventData = eventDoc.data();
+        
+        // Pobierz ostatnią wiadomość
+        let lastMessage: string | undefined;
+        let lastMessageAuthor: string | undefined;
+        let lastMessageTime: string | undefined;
+        
+        try {
+          const messagesQuery = query(
+            collection(db, 'events', eventDoc.id, 'messages'),
+            orderBy('timestamp', 'desc'),
+            limit(1)
+          );
+          const messagesSnap = await getDocs(messagesQuery);
+          
+          if (!messagesSnap.empty) {
+            const lastMsg = messagesSnap.docs[0].data();
+            lastMessage = lastMsg.text;
+            lastMessageTime = lastMsg.timestamp?.toDate().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+            
+            // Pobierz nick autora (preferuj `nick` zamiast email)
+            if (lastMsg.userId) {
+              const userDoc = await getDoc(doc(db, 'users', lastMsg.userId));
+              if (userDoc.exists()) {
+                const userData = userDoc.data();
+                lastMessageAuthor = userData?.nick || userData?.displayName || userData?.email || 'Nieznany';
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Błąd pobierania ostatniej wiadomości:', err);
+        }
+        
+        // Policz nieprzeczytane wiadomości (filter client-side by userId when needed)
+        let unreadCount = 0;
+        try {
+          const readStatusDoc = await getDoc(doc(db, 'events', eventDoc.id, 'readStatus', user.uid));
+          const lastReadTimestamp = readStatusDoc.exists() ? readStatusDoc.data()?.lastReadTimestamp : null;
+
+          if (lastReadTimestamp) {
+            // pobierz wiadomości po lastReadTimestamp, policz te, które nie są od nas
+            const msgsAfterQuery = query(
+              collection(db, 'events', eventDoc.id, 'messages'),
+              where('timestamp', '>', lastReadTimestamp),
+              orderBy('timestamp', 'asc')
+            );
+            const msgsSnap = await getDocs(msgsAfterQuery);
+            unreadCount = msgsSnap.docs.filter(d => d.data()?.userId !== user.uid).length;
+          } else {
+            // brak zapisu - zlicz wszystkie wiadomości nieod nas
+            const msgsQuery = query(
+              collection(db, 'events', eventDoc.id, 'messages'),
+              where('userId', '!=', user.uid)
+            );
+            const msgsSnap = await getDocs(msgsQuery);
+            unreadCount = msgsSnap.size;
+          }
+        } catch (err) {
+          console.error('Błąd liczenia nieprzeczytanych:', err);
+        }
+        
         convs.push({
           eventId: eventDoc.id,
           eventTitle: eventData.title || 'Brak nazwy',
           eventDate: eventData.date || '',
           participantsCount: (eventData.participants || []).length,
-          lastMessage: undefined,
-          lastMessageTime: undefined,
+          lastMessage,
+          lastMessageAuthor,
+          lastMessageTime,
+          unreadCount,
         });
       }
       
@@ -58,9 +123,13 @@ export default function Chats() {
     }
   }, [user, router]);
 
+  const isFocused = useIsFocused();
+
   useEffect(() => {
-    fetchConversations();
-  }, [fetchConversations]);
+    if (isFocused) {
+      fetchConversations();
+    }
+  }, [isFocused, fetchConversations]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -93,15 +162,42 @@ export default function Chats() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item }) => (
             <Pressable
-              style={styles.conversationCard}
+              style={[
+                styles.conversationCard,
+                item.unreadCount > 0 && styles.conversationCardUnread
+              ]}
               onPress={() => router.push(`/GroupChat?eventId=${item.eventId}`)}
             >
               <View style={styles.conversationContent}>
-                <Text style={styles.conversationTitle}>{item.eventTitle}</Text>
-                <Text style={styles.conversationDate}>📅 {item.eventDate}</Text>
-                <Text style={styles.participantsCount}>
-                  <Ionicons name="people" size={14} color="#666" /> {item.participantsCount} uczestników
-                </Text>
+                <View style={styles.conversationHeader}>
+                  <Text style={[
+                    styles.conversationTitle,
+                    item.unreadCount > 0 && styles.conversationTitleUnread
+                  ]}>
+                    {item.eventTitle}
+                  </Text>
+                  {item.unreadCount > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.rowMeta}>
+                  <Text style={styles.conversationDate}>📅 {item.eventDate}</Text>
+                  <Text style={styles.participantsCount}>
+                    <Ionicons name="people" size={14} color="#666" /> {item.participantsCount}
+                  </Text>
+                </View>
+                {item.lastMessage && (
+                  <Text style={[
+                    styles.lastMessage,
+                    item.unreadCount > 0 && styles.lastMessageUnread
+                  ]} numberOfLines={1}>
+                    {item.lastMessageAuthor && `${item.lastMessageAuthor}: `}
+                    {item.lastMessage}
+                    {item.lastMessageTime ? ` · ${item.lastMessageTime}` : ''}
+                  </Text>
+                )}
               </View>
               <Ionicons name="chevron-forward" size={20} color="#4E6EF2" />
             </Pressable>
@@ -122,7 +218,8 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#4E6EF2',
-    padding: 20,
+    paddingTop: 30,
+    paddingHorizontal: 20,
     paddingBottom: 10,
   },
   centerContent: {
@@ -146,28 +243,81 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    elevation: 1,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 },
   },
+  conversationCardUnread: {
+    backgroundColor: '#EEF2FF',
+    borderLeftWidth: 4,
+    borderLeftColor: '#4E6EF2',
+  },
   conversationContent: {
     flex: 1,
+  },
+  conversationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
   },
   conversationTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 4,
+    flex: 1,
+  },
+  conversationTitleUnread: {
+    fontWeight: '700',
+    color: '#000',
   },
   conversationDate: {
     fontSize: 13,
     color: '#666',
-    marginBottom: 4,
+    marginBottom: 0,
+  },
+  rowMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  lastMessage: {
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 6,
+  },
+  lastMessageUnread: {
+    fontWeight: '600',
+    color: '#555',
+  },
+  conversationFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   participantsCount: {
     fontSize: 13,
     color: '#666',
+  },
+  lastMessageTime: {
+    fontSize: 12,
+    color: '#999',
+  },
+  unreadBadge: {
+    backgroundColor: '#4E6EF2',
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    marginLeft: 8,
+  },
+  unreadBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

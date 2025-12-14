@@ -10,7 +10,6 @@ import {
   Modal,
   Alert,
   KeyboardAvoidingView,
-  Platform,
   Animated,
   Easing,
 } from 'react-native';
@@ -32,6 +31,7 @@ import {
   arrayRemove,
 } from 'firebase/firestore';
 import { db, auth } from '@/firebase';
+import { useHeaderHeight } from '@react-navigation/elements';
 
 type Message = {
   id: string;
@@ -99,11 +99,8 @@ const TypingBubble: React.FC<{ names: string[]; active: boolean }> = ({ names, a
   const label = names.length === 1 ? `${names[0]} pisze` : `${names.slice(0, 2).join(', ')} i inni piszą`;
   return (
     <Animated.View style={[styles.typingBubbleRow, { opacity: containerOpacity }]}> 
-      <View style={styles.typingAvatar}>
-        <Ionicons name="chatbubbles" size={20} color="#fff" />
-      </View>
       <View style={styles.typingBubble}>
-        <Text style={styles.typingLabel}>{label}</Text>
+        <Text style={styles.typingLabel} numberOfLines={1} ellipsizeMode="tail">{label}</Text>
         <View style={styles.typingDotsRow}>
           <Animated.View style={[styles.typingDot, { opacity: dot1 }]} />
           <Animated.View style={[styles.typingDot, { marginLeft: 6, opacity: dot2 }]} />
@@ -130,6 +127,7 @@ export default function GroupChat() {
   const [members, setMembers] = useState<Member[]>([]);
   const flatListRef = useRef<FlatList | null>(null);
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const [typingUsers, setTypingUsers] = useState<Member[]>([]);
   // local display state for typing bubble so we can fade out smoothly
   const [displayTypingNames, setDisplayTypingNames] = useState<string[]>([]);
@@ -230,6 +228,20 @@ export default function GroupChat() {
       if (unsubscribeMessages) unsubscribeMessages();
     };
   }, [eventId, user]);
+
+    // Przy opuszczeniu czatu: oznacz wszystkie wiadomości jako przeczytane dla tego użytkownika
+    useEffect(() => {
+      return () => {
+        if (!eventId || !user) return;
+        (async () => {
+          try {
+            await setDoc(doc(db, 'events', eventId, 'readStatus', user.uid), { lastReadTimestamp: serverTimestamp() }, { merge: true });
+          } catch (err) {
+            // ignore write errors
+          }
+        })();
+      };
+    }, [eventId, user]);
 
   // Typing presence: subscribe to typing docs
   useEffect(() => {
@@ -485,7 +497,7 @@ export default function GroupChat() {
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={'padding'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : insets.top + 10}
+        keyboardVerticalOffset={80}
       >
         {menuVisible && (
           <View style={styles.menu}>
@@ -524,7 +536,15 @@ export default function GroupChat() {
 
         <FlatList
           ref={(r) => (flatListRef.current = r)}
-          data={messages}
+          data={(() => {
+            if (displayTypingNames.length === 0) return messages;
+            // append a synthetic typing item so it renders like a normal message
+            return [
+              ...messages,
+              // @ts-ignore - synthetic item
+              { id: '__typing__', userId: '__typing__', userNick: '', text: '', timestamp: undefined },
+            ];
+          })()}
           keyExtractor={(item) => item.id}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
@@ -536,6 +556,14 @@ export default function GroupChat() {
             flatListRef.current?.scrollToEnd({ animated: false });
           }}
           renderItem={({ item }) => {
+            if (item.id === '__typing__') {
+              return (
+                <View style={styles.messageContainer}>
+                  <TypingBubble names={displayTypingNames} active={bubbleActive} />
+                </View>
+              );
+            }
+
             const isOwn = item.userId === user?.uid;
             return (
               <View style={[styles.messageContainer, isOwn && styles.ownMessage]}>
@@ -549,10 +577,6 @@ export default function GroupChat() {
             );
           }}
           contentContainerStyle={styles.messagesList}
-          ListFooterComponent={() => {
-            const names = displayTypingNames;
-            return names.length > 0 ? <TypingBubble names={names} active={bubbleActive} /> : null;
-          }}
         />
 
         <View style={[styles.inputContainer, { paddingBottom: Math.max(12, insets.bottom)}]}>
@@ -668,21 +692,19 @@ const styles = StyleSheet.create({
   
   typingBubbleRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    alignItems: 'flex-start',
+    paddingHorizontal: 0,
+    paddingVertical: 6,
   },
-  typingAvatar: { marginRight: 8 },
   typingBubble: {
     backgroundColor: '#f0f0f0',
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
-    maxWidth: '70%'
   },
   typingLabel: { fontSize: 12, color: '#666', marginBottom: 6 },
   typingDotsRow: { flexDirection: 'row', alignItems: 'center' },
-  typingDot: { width: 8, height: 8, borderRadius: 8, backgroundColor: '#888', opacity: 0.2 },
+  typingDot: { width: 8, height: 8, borderRadius: 8, backgroundColor: '#888', opacity: 0.25 },
   
   memberItem: {
     flexDirection: 'row',
