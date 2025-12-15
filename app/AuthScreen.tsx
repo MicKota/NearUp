@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Alert, Pressable, Image } from 'react-native';
+import { View, Text, TextInput, Button, StyleSheet, Alert, Pressable, Image, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { setDoc, doc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
@@ -46,7 +46,7 @@ export default function AuthScreen() {
           description: '',
         });
         // Przekieruj na ekran edycji profilu
-        router.replace({ pathname: '/UserProfile', params: { userId: userCredential.user.uid, edit: 'true' } });
+        router.replace({ pathname: '/(tabs)/UserProfile', params: { userId: userCredential.user.uid, edit: 'true' } });
       }
     } catch (e: any) {
       setError(e.message);
@@ -56,51 +56,64 @@ export default function AuthScreen() {
 
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.logo}>NearUp</Text>
-      <Text style={styles.header}>{isLogin ? 'Logowanie' : 'Rejestracja'}</Text>
-      {!isLogin && (
-        <>
-          <TextInput
-            style={styles.input}
-            placeholder="Nick (unikalny)"
-            value={nick}
-            onChangeText={setNick}
-            maxLength={NICK_MAX_LENGTH}
-          />
-          <CategorySelector selected={favoriteCategories} onChange={setFavoriteCategories} />
-        </>
-      )}
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Hasło"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-      {!!error && <Text style={styles.error}>{error}</Text>}
-      <Button title={isLogin ? 'Zaloguj się' : 'Zarejestruj się'} onPress={handleAuth} disabled={loading} />
-      {/* Usunięto logowanie Google/Facebook */}
-      <Pressable onPress={() => setIsLogin((v) => !v)} style={{ marginTop: 20 }}>
-        <Text style={{ color: '#4E6EF2' }}>{isLogin ? 'Nie masz konta? Zarejestruj się' : 'Masz już konto? Zaloguj się'}</Text>
-      </Pressable>
-    </View>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.logo}>NearUp</Text>
+        <Text style={styles.header}>{isLogin ? 'Logowanie' : 'Rejestracja'}</Text>
+        {!isLogin && (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder="Nick (unikalny)"
+              value={nick}
+              onChangeText={setNick}
+              maxLength={NICK_MAX_LENGTH}
+            />
+            <CategorySelector selected={favoriteCategories} onChange={setFavoriteCategories} />
+          </>
+        )}
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Hasło"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+        {!!error && <Text style={styles.error}>{error}</Text>}
+        <Button title={isLogin ? 'Zaloguj się' : 'Zarejestruj się'} onPress={handleAuth} disabled={loading} />
+        {/* Usunięto logowanie Google/Facebook */}
+        <Pressable onPress={() => setIsLogin((v) => !v)} style={{ marginTop: 20 }}>
+          <Text style={{ color: '#4E6EF2' }}>{isLogin ? 'Nie masz konta? Zarejestruj się' : 'Masz już konto? Zaloguj się'}</Text>
+        </Pressable>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#fff',
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
     padding: 24,
   },
   logo: {

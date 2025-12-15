@@ -30,7 +30,7 @@ export default function Chats() {
 
   const fetchConversations = useCallback(async () => {
     if (!user) {
-      router.replace('/AuthScreen');
+      setLoading(false);
       return;
     }
 
@@ -158,6 +158,22 @@ export default function Chats() {
     setRefreshing(true);
     fetchConversations().finally(() => setRefreshing(false));
   }, [fetchConversations]);
+
+  // Wyświetl ekran logowania dla niezalogowanych
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.notLoggedInContainer}>
+          <Ionicons name="chatbubbles-outline" size={80} color="#ccc" style={{ marginBottom: 20 }} />
+          <Text style={styles.notLoggedInText}>Nie jesteś zalogowany</Text>
+          <Text style={styles.notLoggedInSubtext}>Zaloguj się, aby przeglądać swoje rozmowy</Text>
+          <Pressable onPress={() => router.push('/AuthScreen')} style={styles.loginButton}>
+            <Text style={styles.loginButtonText}>Zaloguj się</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const renderConversationCard = (item: Conversation) => (
     <Pressable
@@ -414,4 +430,39 @@ const styles = StyleSheet.create({
   },
   archiveTitle: { fontSize: 15, color: '#444', fontWeight: '600' },
   archiveList: { marginTop: 8 },
+  notLoggedInContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  notLoggedInText: {
+    fontSize: 20,
+    color: '#333',
+    marginBottom: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  notLoggedInSubtext: {
+    fontSize: 15,
+    color: '#666',
+    marginBottom: 30,
+    textAlign: 'center',
+  },
+  loginButton: {
+    backgroundColor: '#4E6EF2',
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  loginButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
 });

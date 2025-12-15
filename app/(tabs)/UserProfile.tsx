@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, TextInput, ScrollView, Alert, Pressable, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { db, auth } from '../../firebase';
 import CategorySelector from '../../components/CategorySelector';
 import { NICK_MIN_LENGTH, NICK_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from '../../constants/Validation';
@@ -27,17 +28,13 @@ export default function UserProfile() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
 
-  // Sprawdzanie zalogowania
-  useEffect(() => {
-    if (!user) {
-      router.replace('/AuthScreen');
-      return;
-    }
-  }, [user]);
-
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchProfileAndEvents = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     if (user?.uid) {
       const userRef = doc(db, 'users', user.uid);
@@ -158,6 +155,20 @@ export default function UserProfile() {
     }
     setChangingPassword(false);
   };
+
+  // Wyświetl ekran logowania dla niezalogowanych
+  if (!user) {
+    return (
+      <View style={styles.center}>
+        <Ionicons name="person-circle-outline" size={80} color="#ccc" style={{ marginBottom: 20 }} />
+        <Text style={styles.notLoggedInText}>Nie jesteś zalogowany</Text>
+        <Text style={styles.notLoggedInSubtext}>Zaloguj się, aby zobaczyć swój profil</Text>
+        <Pressable onPress={() => router.push('/AuthScreen')} style={styles.loginButton}>
+          <Text style={styles.loginButtonText}>Zaloguj się</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   if (loading) return <View style={styles.center}><Text>Ładowanie...</Text></View>;
   if (!profile) return <View style={styles.center}><Text>Nie znaleziono użytkownika</Text></View>;
@@ -337,6 +348,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#fff',
   },
   avatar: {
     width: 100,
@@ -427,5 +439,34 @@ const styles = StyleSheet.create({
   disabledInput: {
     backgroundColor: '#f3f3f3',
     color: '#666',
+  },
+  notLoggedInText: {
+    fontSize: 20,
+    color: '#333',
+    marginBottom: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  notLoggedInSubtext: {
+    fontSize: 15,
+    color: '#666',
+    marginBottom: 30,
+    textAlign: 'center',
+  },
+  loginButton: {
+    backgroundColor: '#4E6EF2',
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  loginButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
