@@ -9,9 +9,9 @@ import {
   FlatList,
   Modal,
   Alert,
-  KeyboardAvoidingView,
   Animated,
   Easing,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
@@ -129,6 +129,21 @@ export default function GroupChat() {
   const flatListRef = useRef<FlatList | null>(null);
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   const [typingUsers, setTypingUsers] = useState<Member[]>([]);
   // local display state for typing bubble so we can fade out smoothly
   const [displayTypingNames, setDisplayTypingNames] = useState<string[]>([]);
@@ -138,7 +153,6 @@ export default function GroupChat() {
   const typingActiveRef = useRef(false);
   const heartbeatRef = useRef<number | null>(null);
   const inactivityTimeoutRef = useRef<number | null>(null);
-
   const membersByIdRef = useRef<Record<string, string>>({});
 
   const membersById = useMemo(() => {
@@ -495,11 +509,7 @@ export default function GroupChat() {
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={'padding'}
-        keyboardVerticalOffset={80}
-      >
+      <View style={{ flex: 1 }}>
         {menuVisible && (
           <View style={styles.menu}>
             <Pressable
@@ -580,7 +590,7 @@ export default function GroupChat() {
           contentContainerStyle={styles.messagesList}
         />
 
-        <View style={[styles.inputContainer, { paddingBottom: Math.max(12, insets.bottom)}]}>
+        <View style={[styles.inputContainer, { marginBottom: keyboardHeight > 0 ? keyboardHeight + insets.bottom : insets.bottom }]}>
           <TextInput
             style={styles.input}
             placeholder="Napisz wiadomość..."
@@ -632,7 +642,7 @@ export default function GroupChat() {
             />
           </SafeAreaView>
         </Modal>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -663,10 +673,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 12,
     borderTopWidth: 1,
     borderTopColor: '#eee',
     gap: 8,
+    backgroundColor: '#fff',
   },
   input: {
     flex: 1,
