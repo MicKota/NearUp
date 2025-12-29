@@ -14,16 +14,15 @@ import {
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { collection, addDoc } from 'firebase/firestore';
+import { firebaseErrorMessage } from '../utils/firebaseErrors';
 import { db, auth } from '../firebase';
 import MapView, { Marker } from 'react-native-maps';
 import type { MapPressEvent } from 'react-native-maps';
-import { Picker } from '@react-native-picker/picker';
-import { EVENT_CATEGORIES, EventCategory } from '../types/eventCategory';
+import { EventCategory } from '../types/eventCategory';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
-
-
 import { SafeAreaView } from 'react-native';
+import CategorySelector from '../components/CategorySelector';
 
 export default function CreateEvent() {
   // Ustaw lokalizację użytkownika jako domyślną po wejściu
@@ -46,7 +45,7 @@ export default function CreateEvent() {
   const [address, setAddress] = useState('');
   const [addressInput, setAddressInput] = useState('');
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [category, setCategory] = useState('');
+  const [category, setCategory] = useState<EventCategory | ''>('');
   const [date, setDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [time, setTime] = useState<Date | null>(null);
@@ -126,9 +125,9 @@ export default function CreateEvent() {
       Alert.alert('Wydarzenie utworzone!');
       // Przekaż parametr do routera, aby wymusić odświeżenie listy
       router.push({ pathname: '/', params: { refresh: '1' } });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Błąd podczas zapisu:', error);
-      Alert.alert('Błąd podczas zapisywania wydarzenia.');
+      Alert.alert('Błąd podczas zapisywania wydarzenia', firebaseErrorMessage(error));
     }
   };
 
@@ -152,18 +151,12 @@ export default function CreateEvent() {
           multiline
         />
 
-        <Text style={styles.label}>Kategoria:</Text>
-        <View style={styles.pickerWrapper}>
-          <Picker
-            selectedValue={category}
-            onValueChange={(itemValue) => setCategory(itemValue as EventCategory)}
-          >
-            <Picker.Item label="Wybierz kategorię" value="" />
-            {EVENT_CATEGORIES.map(cat => (
-              <Picker.Item key={cat} label={cat} value={cat} />
-            ))}
-          </Picker>
-        </View>
+        <CategorySelector
+          selected={category}
+          onChange={(val) => setCategory(typeof val === 'string' ? val : '')}
+          label="Kategoria wydarzenia:"
+          mode="single"
+        />
 
         <Text style={styles.label}>Data wydarzenia:</Text>
         <Pressable onPress={() => setShowDatePicker(true)} style={styles.pickerButton}>

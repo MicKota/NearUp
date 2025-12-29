@@ -33,19 +33,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { collection, getDocs, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
+import { firebaseErrorMessage } from '../../utils/firebaseErrors';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
-import { EVENT_CATEGORIES, EventCategory } from '../../types/eventCategory';
+import { EventCategory } from '../../types/eventCategory';
+import CategorySelector from '../../components/CategorySelector';
+import { Alert } from 'react-native';
 
 
 
 
 function HomeScreen() {
   const mapRef = useRef<MapView>(null);
-
-
   const router = useRouter();
   const params = useLocalSearchParams();
   const [events, setEvents] = useState<EventItem[]>([]);
@@ -55,7 +56,6 @@ function HomeScreen() {
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null);
   const [selectedEventIndex, setSelectedEventIndex] = useState<number | null>(null);
-
   const [categoryFilter, setCategoryFilter] = useState<EventCategory | ''>('');
   const [dateFilter, setDateFilter] = useState<Date | null>(null);
   const [sortOption, setSortOption] = useState<string | null>(null);
@@ -111,8 +111,9 @@ function HomeScreen() {
         };
       });
       setEvents(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Błąd podczas pobierania wydarzeń:', error);
+      Alert.alert('Błąd pobierania wydarzeń', firebaseErrorMessage(error));
     }
   };
 
@@ -145,7 +146,6 @@ function HomeScreen() {
       data = data.filter((e) => e.date === selectedDate);
     }
 
-    // Filtruj po odległości
     if (distanceFilter && userLocation) {
       data = data.filter((e) => {
         if (!e.location) return false;
@@ -186,7 +186,6 @@ function HomeScreen() {
     setFilteredEvents(data);
   }, [events, categoryFilter, dateFilter, sortOption, userLocation, distanceFilter]);
 
-  // Helper: oblicz listę wydarzeń wg dowolnych filtrów (nie musi używać stanów)
   const computeFilteredList = useCallback((
     evts: EventItem[],
     cat: EventCategory | '' ,
@@ -290,7 +289,6 @@ function HomeScreen() {
     setSelectedEventIndex(index);
   };
 
-  // Join / leave event
   const toggleJoinEvent = async (eventId: string, joined: boolean) => {
     const user = auth.currentUser;
     if (!user) {
@@ -308,8 +306,9 @@ function HomeScreen() {
         await updateDoc(userRef, { joinedEvents: arrayRemove(eventId) });
       }
       await fetchEvents();
-    } catch (e) {
+    } catch (e: any) {
       console.error('Join error', e);
+      alert(firebaseErrorMessage(e));
     }
   };
 
@@ -326,7 +325,6 @@ function HomeScreen() {
     setFilterModalVisible(false);
   };
 
-  // Reset tylko pending (formularz) — nie zamyka modalu
   const resetPendingFilters = () => {
     setPendingCategoryFilter('');
     setPendingDateFilter(null);
@@ -416,7 +414,6 @@ function HomeScreen() {
       keyExtractor={(item) => item.id}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       renderItem={({ item }) => {
-        // Oblicz odległość od użytkownika
         let distanceText = '';
         if (userLocation && item.location) {
           const R = 6371; // km
@@ -484,7 +481,6 @@ function HomeScreen() {
               </View>
             </View>
             <Text style={styles.detail}>{createdText} {distanceText}</Text>
-            {/* Join removed from list items — joining allowed only in EventDetails */}
           </Pressable>
         );
       }}
@@ -539,7 +535,6 @@ function HomeScreen() {
       )}
     </View>
   );
-// Helper component for popup with swipe and tap
 
 function PopupWithSwipe({
   selectedEvent,
@@ -662,7 +657,6 @@ function PopupWithSwipe({
         </View>
         <Text style={styles.popupInfo}>{createdText} {distanceText}</Text>
       </Pressable>
-      {/* Join button removed from popup; joining allowed only in full EventDetails. Participants shown inline above. */}
     </View>
   );
 }
@@ -713,17 +707,13 @@ function PopupWithSwipe({
             <Pressable onPress={() => setFilterModalVisible(false)} style={{ position: 'absolute', top: 12, right: 12 }}>
               <Ionicons name="close" size={20} color="#666" />
             </Pressable>
-            <Text style={{ marginTop: 10 }}>Kategoria</Text>
-            <View style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, marginTop: 6 }}>
-              <Picker
-                selectedValue={pendingCategoryFilter}
-                onValueChange={(itemValue) => setPendingCategoryFilter(itemValue as EventCategory | '')}>
-                <Picker.Item label="Wybierz kategorię" value="" />
-                {EVENT_CATEGORIES.map((cat) => (
-                  <Picker.Item key={cat} label={cat} value={cat} />
-                ))}
-              </Picker>
-            </View>
+            <CategorySelector
+              selected={pendingCategoryFilter}
+              onChange={(val) => setPendingCategoryFilter(typeof val === 'string' ? val : '')}
+              label="Kategoria"
+              mode="single"
+              containerStyle={{ marginTop: 10, marginBottom: 12 }}
+            />
             <Text style={{ marginTop: 10 }}>Kiedy</Text>
             <Pressable onPress={() => setShowDatePicker(true)} style={styles.input}>
               <Text>{pendingDateFilter ? pendingDateFilter.toDateString() : 'Wybierz datę'}</Text>
@@ -734,9 +724,7 @@ function PopupWithSwipe({
                 mode="date"
                 display="default"
                 onChange={(e, selectedDate) => {
-                  // Zamknij picker zawsze, ale przy anulowaniu (dismissed) nie zmieniaj pendingDateFilter
                   setShowDatePicker(false);
-                  // Na Android/iOS event może mieć strukturę { type: 'dismissed' } lub być string 'dismissed'
                   const dismissed = (
                     (typeof e === 'object' && e != null && (e as any).type === 'dismissed') ||
                     (typeof e === 'string' && e === 'dismissed')
@@ -757,7 +745,6 @@ function PopupWithSwipe({
                   } else {
                     const val = Number(itemValue);
                     setPendingDistanceFilter(val);
-                    // jeśli nie mamy lokalizacji użytkownika, pobierz ją od razu
                     if (!userLocation) {
                       fetchLocation();
                     }

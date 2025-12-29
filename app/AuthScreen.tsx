@@ -1,21 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useLayoutEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, Pressable, Image, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { setDoc, doc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { firebaseErrorMessage } from '../utils/firebaseErrors';
 import CategorySelector from '../components/CategorySelector';
+import { EventCategory } from '../types/eventCategory';
 import { NICK_MIN_LENGTH, NICK_MAX_LENGTH } from '../constants/Validation';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 
 export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nick, setNick] = useState('');
-  const [favoriteCategories, setFavoriteCategories] = useState<string[]>([]);
+  const [favoriteCategories, setFavoriteCategories] = useState<EventCategory[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const navigation = useNavigation();
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: isLogin ? 'Logowanie' : 'Rejestracja',
+    });
+  }, [isLogin, navigation]);
 
 
   const handleAuth = async () => {
@@ -24,8 +33,8 @@ export default function AuthScreen() {
     try {
       if (isLogin) {
         await signInWithEmailAndPassword(auth, email, password);
+        router.replace('/(tabs)');
       } else {
-        // Validate nick length
         if (!nick || nick.length < NICK_MIN_LENGTH) {
           Alert.alert(`Nick musi mieć co najmniej ${NICK_MIN_LENGTH} znaki`);
           setLoading(false);
@@ -37,7 +46,6 @@ export default function AuthScreen() {
           return;
         }
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        // Zapisz nick do Firestore
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           nick,
           email,
@@ -45,11 +53,11 @@ export default function AuthScreen() {
           favoriteCategories,
           description: '',
         });
-        // Przekieruj na ekran edycji profilu
         router.replace({ pathname: '/(tabs)/UserProfile', params: { userId: userCredential.user.uid, edit: 'true' } });
       }
     } catch (e: any) {
-      setError(e.message);
+      const friendly = firebaseErrorMessage(e);
+      setError(friendly);
     }
     setLoading(false);
   };
@@ -67,7 +75,6 @@ export default function AuthScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.logo}>NearUp</Text>
-        <Text style={styles.header}>{isLogin ? 'Logowanie' : 'Rejestracja'}</Text>
         {!isLogin && (
           <>
             <TextInput
@@ -77,7 +84,7 @@ export default function AuthScreen() {
               onChangeText={setNick}
               maxLength={NICK_MAX_LENGTH}
             />
-            <CategorySelector selected={favoriteCategories} onChange={setFavoriteCategories} />
+            <CategorySelector selected={favoriteCategories} onChange={setFavoriteCategories} mode="multiple" />
           </>
         )}
         <TextInput
@@ -96,7 +103,6 @@ export default function AuthScreen() {
         />
         {!!error && <Text style={styles.error}>{error}</Text>}
         <Button title={isLogin ? 'Zaloguj się' : 'Zarejestruj się'} onPress={handleAuth} disabled={loading} />
-        {/* Usunięto logowanie Google/Facebook */}
         <Pressable onPress={() => setIsLogin((v) => !v)} style={{ marginTop: 20 }}>
           <Text style={{ color: '#4E6EF2' }}>{isLogin ? 'Nie masz konta? Zarejestruj się' : 'Masz już konto? Zaloguj się'}</Text>
         </Pressable>
@@ -120,10 +126,6 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: 'bold',
     color: '#4E6EF2',
-    marginBottom: 16,
-  },
-  header: {
-    fontSize: 20,
     marginBottom: 16,
   },
   input: {

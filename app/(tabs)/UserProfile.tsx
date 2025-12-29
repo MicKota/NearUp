@@ -7,7 +7,9 @@ import CategorySelector from '../../components/CategorySelector';
 import { NICK_MIN_LENGTH, NICK_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from '../../constants/Validation';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
+import { firebaseErrorMessage } from '../../utils/firebaseErrors';
 import * as ImagePicker from 'expo-image-picker';
+import { EventCategory } from '../../types/eventCategory';
 
 export default function UserProfile() {
   const router = useRouter();
@@ -20,7 +22,7 @@ export default function UserProfile() {
   const [avatar, setAvatar] = useState('');
   const [nick, setNick] = useState('');
   const [description, setDescription] = useState('');
-  const [favoriteCategories, setFavoriteCategories] = useState<string[]>([]);
+  const [favoriteCategories, setFavoriteCategories] = useState<EventCategory[]>([]);
   const [userEvents, setUserEvents] = useState<any[]>([]);
   const [joinedEvents, setJoinedEvents] = useState<any[]>([]);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -45,7 +47,8 @@ export default function UserProfile() {
         setAvatar(data.avatar || '');
         setNick(data.nick || '');
         setDescription(data.description || '');
-        setFavoriteCategories(data.favoriteCategories || []);
+        const categories = Array.isArray(data.favoriteCategories) ? data.favoriteCategories.filter(Boolean) : [];
+        setFavoriteCategories(categories as EventCategory[]);
       }
       // Fetch events created by this user
       const eventsQuery = query(collection(db, 'events'), where('userId', '==', user.uid));
@@ -99,8 +102,8 @@ export default function UserProfile() {
       Alert.alert('Zapisano zmiany!');
       // Refresh profile and related data so UI shows latest values
       await fetchProfileAndEvents();
-    } catch (e) {
-      Alert.alert('Błąd podczas zapisu.');
+    } catch (e: any) {
+      Alert.alert('Błąd podczas zapisu', firebaseErrorMessage(e));
     }
     setSaving(false);
   };
@@ -122,7 +125,8 @@ export default function UserProfile() {
     setAvatar(profile?.avatar || '');
     setNick(profile?.nick || '');
     setDescription(profile?.description || '');
-    setFavoriteCategories(profile?.favoriteCategories || []);
+    const categories = Array.isArray(profile?.favoriteCategories) ? profile?.favoriteCategories.filter(Boolean) : [];
+    setFavoriteCategories(categories as EventCategory[]);
     setEdit(false);
   };
 
@@ -150,7 +154,7 @@ export default function UserProfile() {
         await auth.signOut();
         router.replace('/AuthScreen');
       } else {
-        Alert.alert('Błąd podczas zmiany hasła', e?.message || String(e));
+        Alert.alert('Błąd podczas zmiany hasła', firebaseErrorMessage(e));
       }
     }
     setChangingPassword(false);
@@ -237,7 +241,7 @@ export default function UserProfile() {
         <Text style={styles.desc}>{profile?.description || 'Brak opisu'}</Text>
       )}
       {edit ? (
-        <CategorySelector selected={favoriteCategories} onChange={setFavoriteCategories} />
+        <CategorySelector selected={favoriteCategories} onChange={setFavoriteCategories} mode="multiple" />
       ) : (
         <>
           <Text style={styles.label}>Ulubione kategorie:</Text>

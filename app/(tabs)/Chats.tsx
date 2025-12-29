@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, SafeAreaView, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, SafeAreaView, RefreshControl, ScrollView, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { db, auth } from '../../firebase';
+import { firebaseErrorMessage } from '../../utils/firebaseErrors';
 import { collection, query, where, getDocs, doc, getDoc, orderBy, limit } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -35,7 +36,6 @@ export default function Chats() {
     }
 
     try {
-      // Pobierz wszystkie wydarzenia do których użytkownik dołączył
       const eventsQuery = query(
         collection(db, 'events'),
         where('participants', 'array-contains', user.uid)
@@ -47,7 +47,6 @@ export default function Chats() {
       for (const eventDoc of eventsSnap.docs) {
         const eventData = eventDoc.data();
         
-        // Pobierz ostatnią wiadomość
         let lastMessage: string | undefined;
         let lastMessageAuthor: string | undefined;
         let lastMessageTime: string | undefined;
@@ -65,11 +64,9 @@ export default function Chats() {
             const lastMsgDoc = messagesSnap.docs[0];
             const lastMsg = lastMsgDoc.data();
             lastMessage = lastMsg.text;
-            // store localized time for display and raw timestamp for sorting
             lastMessageTime = lastMsg.timestamp?.toDate().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
             lastMessageTimestamp = lastMsg.timestamp?.toMillis ? lastMsg.timestamp.toMillis() : (lastMsg.timestamp ? new Date(lastMsg.timestamp).getTime() : undefined);
             
-            // Pobierz nick autora (preferuj `nick` zamiast email)
             if (lastMsg.userId) {
               const userDoc = await getDoc(doc(db, 'users', lastMsg.userId));
               if (userDoc.exists()) {
@@ -82,14 +79,12 @@ export default function Chats() {
           console.error('Błąd pobierania ostatniej wiadomości:', err);
         }
         
-        // Policz nieprzeczytane wiadomości (filter client-side by userId when needed)
         let unreadCount = 0;
         try {
           const readStatusDoc = await getDoc(doc(db, 'events', eventDoc.id, 'readStatus', user.uid));
           const lastReadTimestamp = readStatusDoc.exists() ? readStatusDoc.data()?.lastReadTimestamp : null;
 
           if (lastReadTimestamp) {
-            // pobierz wiadomości po lastReadTimestamp, policz te, które nie są od nas
             const msgsAfterQuery = query(
               collection(db, 'events', eventDoc.id, 'messages'),
               where('timestamp', '>', lastReadTimestamp),
@@ -98,7 +93,6 @@ export default function Chats() {
             const msgsSnap = await getDocs(msgsAfterQuery);
             unreadCount = msgsSnap.docs.filter(d => d.data()?.userId !== user.uid).length;
           } else {
-            // brak zapisu - zlicz wszystkie wiadomości nieod nas
             const msgsQuery = query(
               collection(db, 'events', eventDoc.id, 'messages'),
               where('userId', '!=', user.uid)
@@ -123,7 +117,6 @@ export default function Chats() {
         });
       }
       
-      // split into active vs past (based on eventDate) and sort each by lastMessageTimestamp desc
       const active: Conversation[] = [];
       const past: Conversation[] = [];
       const now = new Date();
@@ -139,8 +132,9 @@ export default function Chats() {
 
       setConversations(active);
       setPastConversations(past);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Błąd pobierania rozmów:', error);
+      Alert.alert('Błąd pobierania rozmów', firebaseErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -159,7 +153,6 @@ export default function Chats() {
     fetchConversations().finally(() => setRefreshing(false));
   }, [fetchConversations]);
 
-  // Wyświetl ekran logowania dla niezalogowanych
   if (!user) {
     return (
       <SafeAreaView style={styles.container}>
@@ -287,7 +280,6 @@ export default function Chats() {
           contentContainerStyle={styles.listContent}
         />
       )}
-      {/* Archive (past events) toggle */}
       <View style={styles.archiveContainer}>
         <Pressable style={styles.archiveHeader} onPress={() => setArchiveOpen((s) => !s)}>
           <Text style={styles.archiveTitle}>Zakończone wydarzenia ({pastConversations.length})</Text>

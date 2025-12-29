@@ -31,6 +31,7 @@ import {
   arrayRemove,
 } from 'firebase/firestore';
 import { db, auth } from '@/firebase';
+import { firebaseErrorMessage } from '../utils/firebaseErrors';
 import { useHeaderHeight } from '@react-navigation/elements';
 
 type Message = {
@@ -215,9 +216,9 @@ export default function GroupChat() {
             didLoad = true;
           }
         });
-      } catch (err) {
+      } catch (err: any) {
         console.error('Błąd ładowania czatu:', err);
-        Alert.alert('Błąd', 'Nie udało się załadować czatu');
+        Alert.alert('Błąd ładowania czatu', firebaseErrorMessage(err));
         setLoading(false);
       }
     };
@@ -438,9 +439,9 @@ export default function GroupChat() {
       } catch (e) {
         // ignore
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Błąd wysyłania wiadomości:', err);
-      Alert.alert('Błąd', 'Nie udało się wysłać wiadomości');
+      Alert.alert('Błąd wysyłania wiadomości', firebaseErrorMessage(err));
     }
   };
 
@@ -463,9 +464,9 @@ export default function GroupChat() {
               await setTyping(false);
             } catch (e) {}
             router.back();
-          } catch (err) {
+          } catch (err: any) {
             console.error('Błąd opuszczania grupy:', err);
-            Alert.alert('Błąd', 'Nie udało się opuścić grupy');
+            Alert.alert('Błąd opuszczania grupy', firebaseErrorMessage(err));
           }
         },
       },
