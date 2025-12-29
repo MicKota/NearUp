@@ -144,6 +144,21 @@ export default function GroupChat() {
     };
   }, []);
 
+  // When keyboard appears, ensure the list scrolls to the newest message
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      // Delay a bit so layout has updated
+      setTimeout(() => {
+        try {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        } catch (e) {
+          // ignore
+        }
+      }, 120);
+    });
+    return () => sub.remove();
+  }, []);
+
   const [typingUsers, setTypingUsers] = useState<Member[]>([]);
   // local display state for typing bubble so we can fade out smoothly
   const [displayTypingNames, setDisplayTypingNames] = useState<string[]>([]);
@@ -447,6 +462,8 @@ export default function GroupChat() {
         timestamp: serverTimestamp(),
       });
       setMessageText('');
+        // ensure newest message is visible after sending
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
       // clear typing status when message is sent
       try {
         await setTyping(false);
