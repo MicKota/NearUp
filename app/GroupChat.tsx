@@ -12,10 +12,13 @@ import {
   Animated,
   Easing,
   Keyboard,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useRouter, useNavigation, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { setCurrentViewingEvent } from '../utils/notifications';
 import {
   doc,
   getDoc,
@@ -130,6 +133,18 @@ export default function GroupChat() {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Track when user is viewing this chat (to suppress notifications)
+  useFocusEffect(
+    React.useCallback(() => {
+      if (eventId) {
+        setCurrentViewingEvent(eventId);
+      }
+      return () => {
+        setCurrentViewingEvent(null);
+      };
+    }, [eventId])
+  );
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (e) => {

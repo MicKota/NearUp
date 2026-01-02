@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, SafeAreaView, RefreshControl, ScrollView, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { db, auth } from '../../firebase';
 import { firebaseErrorMessage } from '../../utils/firebaseErrors';
@@ -142,11 +142,12 @@ export default function Chats() {
 
   const isFocused = useIsFocused();
 
-  useEffect(() => {
-    if (isFocused) {
+  // Refresh when screen comes into focus (including from notifications)
+  useFocusEffect(
+    useCallback(() => {
       fetchConversations();
-    }
-  }, [isFocused, fetchConversations]);
+    }, [fetchConversations])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

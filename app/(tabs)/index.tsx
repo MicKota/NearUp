@@ -31,9 +31,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { collection, getDocs, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, arrayUnion, arrayRemove, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { firebaseErrorMessage } from '../../utils/firebaseErrors';
+import { registerForNotifications, presentLocalNotification, scheduleEventReminder, cancelEventReminder, getCurrentViewingEvent } from '../../utils/notifications';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -79,6 +80,78 @@ function HomeScreen() {
       setPendingDistanceFilter(distanceFilter);
     }
   }, [filterModalVisible]);
+
+  // Listen for new messages in events the user might be interested in and show local notification
+  const messageUnsubsRef = React.useRef<Record<string, () => void>>({});
+  const lastMsgIdRef = React.useRef<Record<string, string>>({});
+  const initialLoadRef = React.useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    // Register for notifications on mount
+    registerForNotifications();
+  }, []);
+
+  useEffect(() => {
+    // clear old listeners
+    Object.values(messageUnsubsRef.current).forEach(u => u && u());
+    messageUnsubsRef.current = {};
+    // Don't clear lastMsgIdRef - keep tracking to avoid re-notifying
+
+    const currentUserId = auth.currentUser?.uid;
+
+    // subscribe to latest message for each event
+    events.forEach((ev) => {
+      try {
+        const q = query(collection(db, 'events', ev.id, 'messages'), orderBy('timestamp', 'desc'), limit(1));
+        const unsub = onSnapshot(q, (snap) => {
+          if (snap.empty) return;
+          const msgDoc = snap.docs[0];
+          const msgId = msgDoc.id;
+          const data: any = msgDoc.data();
+          
+          // Skip if this is the initial load for this event
+          if (!initialLoadRef.current[ev.id]) {
+            initialLoadRef.current[ev.id] = true;
+            lastMsgIdRef.current[ev.id] = msgId;
+            return;
+          }
+          
+          // Skip if we already notified about this message
+          if (lastMsgIdRef.current[ev.id] === msgId) {
+            return;
+          }
+          
+          // Skip if it's our own message
+          if (data?.userId === currentUserId) {
+            lastMsgIdRef.current[ev.id] = msgId;
+            return;
+          }
+          
+          // Skip if user is currently viewing this chat
+          if (getCurrentViewingEvent() === ev.id) {
+            lastMsgIdRef.current[ev.id] = msgId;
+            return;
+          }
+          
+          // Update tracked message and show notification
+          lastMsgIdRef.current[ev.id] = msgId;
+          presentLocalNotification(
+            ev.title || 'Nowa wiadomość', 
+            data?.text || 'Nowa wiadomość',
+            ev.id
+          );
+        });
+        messageUnsubsRef.current[ev.id] = unsub;
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    return () => {
+      Object.values(messageUnsubsRef.current).forEach(u => u && u());
+      messageUnsubsRef.current = {};
+    };
+  }, [events]);
 
     useEffect(() => {
     if (viewMode === 'map' && userLocation && mapRef.current) {
@@ -127,6 +200,13 @@ function HomeScreen() {
       longitude: loc.coords.longitude,
     });
   };
+
+  // Register for local notifications on mount
+  useEffect(() => {
+    (async () => {
+      await registerForNotifications();
+    })();
+  }, []);
 
   const filterAndSortEvents = useCallback(() => {
     let data = [...events];
@@ -300,9 +380,18 @@ function HomeScreen() {
       const userRef = doc(db, 'users', user.uid);
       if (!joined) {
         await updateDoc(eventRef, { participants: arrayUnion(user.uid) });
+        // schedule 24h reminder for this event if we have its data
+        const ev = events.find(e => e.id === eventId);
+        if (ev) {
+          // combine date and time into ISO string (assume local timezone)
+          const iso = ev.date + 'T' + (ev.time || '00:00') + ':00';
+          scheduleEventReminder(eventId, ev.title || 'Wydarzenie', iso);
+        }
         await updateDoc(userRef, { joinedEvents: arrayUnion(eventId) });
       } else {
         await updateDoc(eventRef, { participants: arrayRemove(user.uid) });
+        // cancel reminder
+        cancelEventReminder(eventId);
         await updateDoc(userRef, { joinedEvents: arrayRemove(eventId) });
       }
       await fetchEvents();

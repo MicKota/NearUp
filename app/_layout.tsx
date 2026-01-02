@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { setupNotificationResponseHandler } from '../utils/notifications';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -23,6 +24,12 @@ export default function RootLayout() {
     }
   }, [loaded]);
 
+  // Setup notification tap handler
+  useEffect(() => {
+    const subscription = setupNotificationResponseHandler();
+    return () => subscription.remove();
+  }, []);
+
   if (!loaded) {
     return null;
   }
@@ -33,6 +40,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="AuthScreen" options={{ headerShown: true, presentation: 'card' }} />
         <Stack.Screen name="EventDetails" options={{ headerShown: true, title: 'Szczegóły wydarzenia' }} />
+        <Stack.Screen name="GroupChat" options={{ headerShown: true, title: 'Czat' }} />
         <Stack.Screen name="UserProfile" options={{ headerShown: true, title: 'Profil użytkownika' }} />
         <Stack.Screen name="+not-found" />
       </Stack>
