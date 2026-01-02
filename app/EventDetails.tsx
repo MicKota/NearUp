@@ -5,6 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import MapView, { Marker } from 'react-native-maps';
 import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { scheduleEventReminder, cancelEventReminder } from '../utils/notifications';
 
 
 export default function EventDetails() {
@@ -56,9 +57,15 @@ export default function EventDetails() {
       if (!joined) {
         await updateDoc(eventRef, { participants: arrayUnion(user.uid) });
         await updateDoc(userRef, { joinedEvents: arrayUnion(event.id) });
+        // Schedule reminder notification
+        const iso = event.date + 'T' + (event.time || '00:00') + ':00';
+        console.log('[EventDetails] Scheduling reminder for:', event.title, iso);
+        scheduleEventReminder(event.id, event.title || 'Wydarzenie', iso);
       } else {
         await updateDoc(eventRef, { participants: arrayRemove(user.uid) });
         await updateDoc(userRef, { joinedEvents: arrayRemove(event.id) });
+        // Cancel reminder
+        cancelEventReminder(event.id);
       }
       // refresh
       const eventSnap = await getDoc(eventRef);

@@ -93,12 +93,16 @@ export async function scheduleEventReminder(eventId: string, title: string, even
   }
   try {
     const eventDate = new Date(eventDateIso);
-    const remindAt = new Date(eventDate.getTime() - 24 * 60 * 60 * 1000);
-    if (remindAt.getTime() <= Date.now()) return null; // too late
-
+    const remindAt = new Date(eventDate.getTime() - 24 * 60 * 60 * 1000); // 24h before
+    
     const seconds = Math.ceil((remindAt.getTime() - Date.now()) / 1000);
-    if (seconds <= 0) return null;
+    if (seconds <= 0) {
+      console.log(`[Reminder] Event too soon, skipping reminder for: ${title}`);
+      return null; // too late to schedule 24h reminder
+    }
 
+    console.log(`[Reminder] Scheduling notification in ${seconds} seconds (${Math.round(seconds/3600)}h) for: ${title}`);
+    
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: `Przypomnienie: ${title}`,
@@ -106,8 +110,13 @@ export async function scheduleEventReminder(eventId: string, title: string, even
         sound: 'default',
         data: { eventId },
       },
-      trigger: ({ seconds, repeats: false } as any),
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: seconds,
+        repeats: false,
+      },
     });
+    console.log(`[Reminder] Scheduled with id: ${id}`);
     await AsyncStorage.setItem(REMINDER_KEY_PREFIX + eventId, id);
     return id;
   } catch (e) {
