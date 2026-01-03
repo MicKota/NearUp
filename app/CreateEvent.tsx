@@ -134,8 +134,6 @@ export default function CreateEvent() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
       <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 250 }}>
-        <Text style={styles.logo}>NearUp</Text>
-        <Text style={styles.subheader}>Utwórz nowe wydarzenie</Text>
 
         <TextInput
           style={styles.input}

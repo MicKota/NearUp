@@ -39,6 +39,7 @@ export default function RootLayout() {
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="AuthScreen" options={{ headerShown: true, presentation: 'card' }} />
+        <Stack.Screen name="CreateEvent" options={{ headerShown: true, title: 'Nowe wydarzenie' }} />
         <Stack.Screen name="EventDetails" options={{ headerShown: true, title: 'Szczegóły wydarzenia' }} />
         <Stack.Screen name="GroupChat" options={{ headerShown: true, title: 'Czat' }} />
         <Stack.Screen name="UserProfile" options={{ headerShown: true, title: 'Profil użytkownika' }} />
