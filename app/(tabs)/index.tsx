@@ -57,13 +57,13 @@ function HomeScreen() {
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null);
   const [selectedEventIndex, setSelectedEventIndex] = useState<number | null>(null);
-  const [categoryFilter, setCategoryFilter] = useState<EventCategory | ''>('');
+  const [categoryFilter, setCategoryFilter] = useState<EventCategory[]>([]);
   const [dateFilter, setDateFilter] = useState<Date | null>(null);
   const [sortOption, setSortOption] = useState<string | null>(null);
   const [distanceFilter, setDistanceFilter] = useState<number | null>(null); // km
 
   // Tymczasowe (pending) filtry używane w modalnym UI — stosujemy je dopiero po naciśnięciu "Pokaż"
-  const [pendingCategoryFilter, setPendingCategoryFilter] = useState<EventCategory | ''>('');
+  const [pendingCategoryFilter, setPendingCategoryFilter] = useState<EventCategory[]>([]);
   const [pendingDateFilter, setPendingDateFilter] = useState<Date | null>(null);
   const [pendingSortOption, setPendingSortOption] = useState<string | null>(null);
   const [pendingDistanceFilter, setPendingDistanceFilter] = useState<number | null>(null);
@@ -215,9 +215,9 @@ function HomeScreen() {
     const today = new Date().toISOString().split('T')[0];
     data = data.filter((e) => e.date >= today);
 
-    if (categoryFilter) {
+    if (categoryFilter.length > 0) {
       data = data.filter((e) =>
-        e.category.toLowerCase().includes(categoryFilter.toLowerCase())
+        categoryFilter.some(cat => e.category.toLowerCase().includes(cat.toLowerCase()))
       );
     }
 
@@ -268,7 +268,7 @@ function HomeScreen() {
 
   const computeFilteredList = useCallback((
     evts: EventItem[],
-    cat: EventCategory | '' ,
+    cat: EventCategory[],
     dateF: Date | null,
     sortOpt: string | null,
     distFilter: number | null,
@@ -278,8 +278,8 @@ function HomeScreen() {
     const today = new Date().toISOString().split('T')[0];
     data = data.filter((e) => e.date >= today);
 
-    if (cat) {
-      data = data.filter((e) => e.category.toLowerCase().includes(cat.toLowerCase()));
+    if (cat.length > 0) {
+      data = data.filter((e) => cat.some(c => e.category.toLowerCase().includes(c.toLowerCase())));
     }
 
     if (dateF) {
@@ -402,12 +402,12 @@ function HomeScreen() {
   };
 
   const resetFilters = () => {
-    setCategoryFilter('');
+    setCategoryFilter([]);
     setDateFilter(null);
     setSortOption(null);
     setDistanceFilter(null);
     // gdy resetujemy, zresetuj też pending (w modal)
-    setPendingCategoryFilter('');
+    setPendingCategoryFilter([]);
     setPendingDateFilter(null);
     setPendingSortOption(null);
     setPendingDistanceFilter(null);
@@ -415,7 +415,7 @@ function HomeScreen() {
   };
 
   const resetPendingFilters = () => {
-    setPendingCategoryFilter('');
+    setPendingCategoryFilter([]);
     setPendingDateFilter(null);
     setPendingSortOption(null);
     setPendingDistanceFilter(null);
@@ -423,14 +423,18 @@ function HomeScreen() {
 
   const renderActiveFilters = () => {
     const chips: JSX.Element[] = [];
-    if (categoryFilter) chips.push(
-      <View key="cat" style={styles.chip}>
-        <Text style={styles.chipText}>{`Kategoria: ${categoryFilter}`}</Text>
-        <Pressable onPress={() => removeFilter('category')} style={styles.chipClose}>
-          <Ionicons name="close" size={14} color="#4E6EF2" />
-        </Pressable>
-      </View>
-    );
+    if (categoryFilter.length > 0) {
+      categoryFilter.forEach((cat, idx) => {
+        chips.push(
+          <View key={`cat-${idx}`} style={styles.chip}>
+            <Text style={styles.chipText}>{cat}</Text>
+            <Pressable onPress={() => removeCategoryFromFilter(cat)} style={styles.chipClose}>
+              <Ionicons name="close" size={14} color="#4E6EF2" />
+            </Pressable>
+          </View>
+        );
+      });
+    }
     if (dateFilter) chips.push(
       <View key="date" style={styles.chip}>
         <Text style={styles.chipText}>{`Data: ${dateFilter.toISOString().split('T')[0]}`}</Text>
@@ -468,6 +472,15 @@ function HomeScreen() {
     return chips;
   };
 
+  // Usuwa pojedynczą kategorię z filtra
+  const removeCategoryFromFilter = (cat: EventCategory) => {
+    const newCategory = categoryFilter.filter(c => c !== cat);
+    setCategoryFilter(newCategory);
+    setPendingCategoryFilter(newCategory);
+    const newData = computeFilteredList(events, newCategory, dateFilter, sortOption, distanceFilter, userLocation);
+    setFilteredEvents(newData);
+  };
+
   // Usuwa konkretny filtr i od razu odświeża widok listy
   const removeFilter = (which: 'category' | 'date' | 'sort' | 'distance') => {
     let newCategory = categoryFilter;
@@ -475,7 +488,7 @@ function HomeScreen() {
     let newSort = sortOption;
     let newDist = distanceFilter;
 
-    if (which === 'category') newCategory = '';
+    if (which === 'category') newCategory = [];
     if (which === 'date') newDate = null;
     if (which === 'sort') newSort = null;
     if (which === 'distance') newDist = null;
@@ -798,9 +811,9 @@ function PopupWithSwipe({
             </Pressable>
             <CategorySelector
               selected={pendingCategoryFilter}
-              onChange={(val) => setPendingCategoryFilter(typeof val === 'string' ? val : '')}
-              label="Kategoria"
-              mode="single"
+              onChange={(val) => setPendingCategoryFilter(val)}
+              label="Kategorie"
+              mode="multiple"
               containerStyle={{ marginTop: 10, marginBottom: 12 }}
             />
             <Text style={{ marginTop: 10 }}>Kiedy</Text>
